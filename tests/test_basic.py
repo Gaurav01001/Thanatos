@@ -1,4 +1,5 @@
-from thanatos import __version__
+# pyrefly: ignore [missing-import]
+from engine import __version__
 
 
 def test_version():
