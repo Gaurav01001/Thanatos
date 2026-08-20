@@ -9,10 +9,16 @@ def main()-> None:
     state_manager = StateManager()
     logger.info("Current state: %s", state_manager.state.value)
     state_manager.transition_to(State.IDLE)
-    response = brain.respond("hi")
-    logger.info("Brain response : %s", response)
-    
+
+    while state_manager.state == State.IDLE:
+        message = input("You: ")
+
+        if message.lower() == "exit":
+            print("Thanatos: Tataa, byeee!")
+            break
+
+        response = brain.respond(message)
+        print(f"Thanatos: {response}")
+
 if __name__ == "__main__": 
     main()
-else:
-    logger.info("Thanatos Already Started...") 
