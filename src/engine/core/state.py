@@ -21,11 +21,11 @@ class State(Enum): #enum gives us controlled variables
 
 class StateManager:
     _allowed_transitions = {
-        State.STARTING: {State.IDLE, State.ERROR},#im currently in starting im allowed to go idle or error
-        State.IDLE: {State.LISTENING, State.ERROR},
+        State.STARTING: {State.IDLE, State.ERROR},  # im currently in starting im allowed to go idle or error
+        State.IDLE: {State.LISTENING, State.THINKING, State.ERROR},
         State.LISTENING: {State.TRANSCRIBING, State.ERROR},
         State.TRANSCRIBING: {State.THINKING, State.ERROR},
-        State.THINKING: {State.EXECUTING, State.ERROR},
+        State.THINKING: {State.EXECUTING, State.IDLE, State.ERROR},
         State.EXECUTING: {State.IDLE, State.ERROR},
         State.ERROR: {State.IDLE},
     }#none means this function is supposed to return nothing 
@@ -45,7 +45,7 @@ class StateManager:
 
         
         #logging the state transition
-        self._logger.info("State Transition: %s->%s",
+        self._logger.debug("State Transition: %s->%s",
                             self._state.value,
                             new_state.value)
         self._state = new_state

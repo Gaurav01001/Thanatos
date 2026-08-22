@@ -12,13 +12,32 @@ def main()-> None:
 
     while state_manager.state == State.IDLE:
         message = input("You: ")
-
-        if message.lower() == "exit":
+        # to clear chat memory
+        if message.lower() == "clear":
+            print("Thanatos: Cleared! All memory Erasad")
+            brain.clear_memory()
+            continue
+        # to show which state thanatos is 
+        elif message.lower() == "status":
+            print(f"Thanatos State : {state_manager.state.value}")
+            continue
+        # to exit
+        elif message.lower() == "exit":
             print("Thanatos: Tataa, byeee!")
             break
-
-        response = brain.respond(message)
+        # To change state from IDLE to BUSY
+        state_manager.transition_to(State.THINKING)
+        print("Thanatos: Thinking...", end="", flush=True)
+        try:
+            response = brain.respond(message)
+            state_manager.transition_to(State.IDLE)
+        except Exception as e:
+            state_manager.transition_to(State.ERROR)
+            print(f"Thanatos: Something went wrong: {e}")
+            state_manager.transition_to(State.IDLE)
+            continue
+        # Erase "Thanatos: Thinking..." before printing the response
+        print("\r" + " " * 30 + "\r", end="", flush=True)
         print(f"Thanatos: {response}")
-
 if __name__ == "__main__": 
     main()

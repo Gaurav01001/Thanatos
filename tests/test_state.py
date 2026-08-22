@@ -17,6 +17,14 @@ def test_valid_transition():
     manager.transition_to(State.LISTENING) 
     assert manager.state == State.LISTENING
 
+def test_thinking_transitions():
+    manager = StateManager()
+    manager.transition_to(State.IDLE)
+    manager.transition_to(State.THINKING)
+    assert manager.state == State.THINKING
+    manager.transition_to(State.IDLE)
+    assert manager.state == State.IDLE
+
 def test_invalid_transition_raises_error():
     manager = StateManager()
 
