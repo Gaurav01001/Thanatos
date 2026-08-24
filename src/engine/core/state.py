@@ -22,7 +22,7 @@ class State(Enum): #enum gives us controlled variables
 class StateManager:
     _allowed_transitions = {
         State.STARTING: {State.IDLE, State.ERROR},  # im currently in starting im allowed to go idle or error
-        State.IDLE: {State.LISTENING, State.THINKING, State.ERROR},
+        State.IDLE: {State.LISTENING, State.THINKING, State.EXECUTING, State.ERROR},
         State.LISTENING: {State.TRANSCRIBING, State.ERROR},
         State.TRANSCRIBING: {State.THINKING, State.ERROR},
         State.THINKING: {State.EXECUTING, State.IDLE, State.ERROR},

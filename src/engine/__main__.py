@@ -3,7 +3,7 @@ from engine.core.state import State , StateManager
 from engine.brain.brain import Brain 
 from engine.audio.audio import AudioInput
 from engine.stt.transcriber import Transcriber
-
+from engine.executor.executor import Executor
 logger = get_logger("engine")
 brain = Brain()
 
@@ -13,6 +13,7 @@ def main()-> None:
     logger.info("Current state: %s", state_manager.state.value)
     state_manager.transition_to(State.IDLE)
 
+    executor = Executor()
     audio_input = AudioInput()
     transcriber = Transcriber()
     mode = "text"
@@ -47,21 +48,49 @@ def main()-> None:
 
             message = user_input
         
-        # to clear chat memory
+        # Quick check for built-in text commands
         cleaned = message.lower().strip().rstrip(".!?")
         if cleaned == "clear":
-            print("Thanatos: Cleared! All memory Erasad")
+            print("Thanatos: Cleared! All memory Erased")
             brain.clear_memory()
             continue
-        # to show which state thanatos is 
         elif cleaned == "status":
             print(f"Thanatos State : {state_manager.state.value}")
             continue
-        # to exit
         elif cleaned in ("exit", "quit", "bye", "goodbye"):
             print("Thanatos: Tataa, byeee!")
             break
-        # To change state from IDLE to BUSY
+
+        # Check intent dynamically using Brain
+                # Check intent dynamically using Brain
+        ######################################################
+        intent = brain.get_intent(message)
+        action = intent.get("action")
+        target = intent.get("target")
+        folder = intent.get("folder")
+
+        if action == "open_application" and target:
+            state_manager.transition_to(State.EXECUTING)
+            success = executor.open_application(target)
+            if success:
+                print(f"Thanatos: Opened {target}")
+            else:
+                print(f"Thanatos: Could not find or open {target}")
+            state_manager.transition_to(State.IDLE)
+            continue
+
+        elif action == "open_file" and target:
+            state_manager.transition_to(State.EXECUTING)
+            success = executor.open_file(target, folder_hint=folder)
+            if success:
+                print(f"Thanatos: Opened {target}")
+            else:
+                print(f"Thanatos: Could not find file '{target}'")
+            state_manager.transition_to(State.IDLE)
+            continue
+##################################################################
+
+        # To change state from IDLE to THINKING for normal chat
         state_manager.transition_to(State.THINKING)
         print("Thanatos: Thinking...", end="", flush=True)
         try:
