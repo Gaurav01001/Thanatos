@@ -1,10 +1,14 @@
 import os
-import glob
 import difflib
+import urllib.parse
+import time
+import ctypes
+from pynput.keyboard import Controller, Key
 
 class Executor:
 
     def __init__(self):
+        # Index all installed apps on startup
         self.app_index = self._scan_installed_apps()
 
     def _scan_installed_apps(self) -> dict:
@@ -77,7 +81,52 @@ class Executor:
                                 return True
         return False
 
-        
+    def play_spotify(self, query: str) -> bool:
+        """Opens Spotify, focuses the window, and triggers playback for the top result."""
+        if not query:
+            return False
+
+        clean_query = query.strip()
+        encoded = urllib.parse.quote(clean_query)
+        try:
+            # 1. Opens Spotify search URI directly on Windows
+            os.startfile(f"spotify:search:{encoded}")
+            time.sleep(2.0)
+
+            # 2. Bring Spotify window to the foreground so it receives keystrokes
+            user32 = ctypes.windll.user32
+            def enum_cb(hwnd, extra):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    if "spotify" in buff.value.lower():
+                        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                        user32.SetForegroundWindow(hwnd)
+                return True
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            time.sleep(0.5)
+
+            # 3. Navigate to top track and play
+            keyboard = Controller()
+            keyboard.press(Key.tab)
+            keyboard.release(Key.tab)
+            time.sleep(0.3)
+            keyboard.press(Key.down)
+            keyboard.release(Key.down)
+            time.sleep(0.2)
+            keyboard.press(Key.enter)
+            keyboard.release(Key.enter)
+            time.sleep(0.2)
+            keyboard.press(Key.enter)
+            keyboard.release(Key.enter)
+            return True
+        except Exception:
+            return False
+
+
 # "You should open Notepad"
 #           ↓
 #         Brain

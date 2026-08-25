@@ -58,7 +58,7 @@ When the user needs a serious answer, drop the humor and be serious.
 #         ↓
 #      Executor
     def get_intent(self, message: str) -> dict:
-        system_prompt = """You are an intent classifier for a desktop AI assistant.
+        system_prompt = """You are Thanatos an intent classifier for a desktop AI assistant.
 Analyze the user's message and determine what they want to do.
 
 Return a JSON object with EXACTLY these fields:
@@ -71,6 +71,7 @@ Return a JSON object with EXACTLY these fields:
 Allowed actions:
 - "open_application": When user asks to open, launch, or run an app (e.g. "open spotify", "launch blender", "start chrome"). Set "target" to the app name. "folder": null.
 - "open_file": When user asks to open a specific file or folder (e.g. "open my resume pdf in Downloads", "open the photo on Desktop"). Set "target" to the file name, and "folder" to the folder name if mentioned (or null).
+- "play_music": When user asks to play a song, music, track, or artist on Spotify (e.g. "play Starboy", "play music by The Weeknd", "play Bohemian Rhapsody on Spotify"). Set "target" to the song or artist name. "folder": null.
 - "chat": For all normal conversations, greetings, questions, or help. "target": null, "folder": null.
 
 Return ONLY valid raw JSON."""
