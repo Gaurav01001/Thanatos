@@ -10,7 +10,7 @@ from piper.config import SynthesisConfig
 class TextToSpeech:
 
     def __init__(self, speed: float = 1.15):
-        self.voice = PiperVoice.load("en_US-norman-medium.onnx")
+        self.voice = PiperVoice.load("en_US-ryan-medium.onnx")
         # length_scale > 1.0 slows down the speech rate for clearer pronunciation
         self.config = SynthesisConfig(length_scale=speed)
 

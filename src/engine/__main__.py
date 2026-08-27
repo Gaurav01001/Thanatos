@@ -5,9 +5,12 @@ from engine.audio.audio import AudioInput
 from engine.stt.transcriber import Transcriber
 from engine.executor.executor import Executor
 from engine.tts.text_to_speech import TextToSpeech
+from engine.security.validator import SecurityValidator
+from engine.vision.screen import ScreenCapture
 
 logger = get_logger("engine")
 brain = Brain()
+
 
 def main() -> None:
     logger.info("Thanatos Starting...")
@@ -20,8 +23,15 @@ def main() -> None:
     audio_input = AudioInput()
     transcriber = Transcriber()
     tts = TextToSpeech()
+    validator = SecurityValidator()
     mode = "text"
+    screen = ScreenCapture()
 
+    def ask_confirmation() -> bool:
+        response = input("Thanatos: Proceed? (yes/no): ").strip().lower()
+
+        return response in ("yes", "y")
+    
     while state_manager.state == State.IDLE:
 
         # ----------------------------------------------------
@@ -46,8 +56,8 @@ def main() -> None:
             try:
                 user_input = input("You: ").strip()
             except (KeyboardInterrupt, EOFError):
-                print("\nThanatos: Tataa, byeee!")
-                tts.speak("Tataa, byeee!")
+                print("\nThanatos: Glad to assist you!")
+                tts.speak("Glad to assist you!")
                 break
 
             # Pressing Enter on empty prompt switches to Voice Mode
@@ -71,20 +81,51 @@ def main() -> None:
             tts.speak(f"Current state is {state_manager.state.value}")
             continue
         elif cleaned in ("exit", "quit", "bye", "goodbye"):
-            print("Thanatos: Tataa, byeee!")
-            tts.speak("Tataa, byeee!")
+            print("Thanatos: Glad to assist you!")
+            tts.speak("Glad to assist you!")
             break
 
         # ----------------------------------------------------
-        # 3. INTENT DETECTION & ACTION EXECUTION (Open Apps/Files)
+        # 3. INTENT DETECTION & SECURITY VALIDATION
         # ----------------------------------------------------
         intent = brain.get_intent(message)
+
+        # Validate intent before executing any actions
+        status, reason = validator.validate_intent(intent)
+        if status == "BLOCKED":
+            print(f"Thanatos: {reason}")
+            tts.speak(reason)
+            continue
+        elif status == "CONFIRM":
+            print(f"Thanatos: {reason}")
+            tts.speak(reason)
+
+            if not ask_confirmation():
+                print("Thanatos: Cancelled.")
+                tts.speak("Cancelled.")
+                continue
+
         action = intent.get("action")
         target = intent.get("target")
         folder = intent.get("folder")
+        
 
+        if action == "take_screenshot":
+            state_manager.transition_to(State.EXECUTING)
+            try:
+                path = screen.capture()
+                msg = f"Screenshot saved: {path}"
+                print(f"Thanatos: {msg}")
+                tts.speak("Screenshot taken Successfully")
+            except Exception as e:
+                msg = f"Failed to capture screenshot: {e}"
+                print(f"Thanatos: {msg}") 
+                tts.speak("Failed to capture screenshot")
+            state_manager.transition_to(State.IDLE)
+            continue
+            
         # Open Application
-        if action == "open_application" and target:
+        elif action == "open_application" and target:
             state_manager.transition_to(State.EXECUTING)
             success = executor.open_application(target)
             if success:
@@ -116,13 +157,15 @@ def main() -> None:
         # Play Music on Spotify
         elif action == "play_music" and target:
             state_manager.transition_to(State.EXECUTING)
-            msg = f"Playing {target} on Spotify"
+            success = executor.play_spotify(target)
+            if success:
+                msg = f"Playing {target} on Spotify"
+            else:
+                msg = f"I couldn't play {target} on Spotify"
             print(f"Thanatos: {msg}")
             tts.speak(msg)
-            executor.play_spotify(target)
             state_manager.transition_to(State.IDLE)
-            continue
-
+            continue  
         # ----------------------------------------------------
         # 4. CHAT CONVERSATION (Brain LLM + Voice Output)
         # ----------------------------------------------------

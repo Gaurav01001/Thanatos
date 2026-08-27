@@ -69,8 +69,14 @@ Return a JSON object with EXACTLY these fields:
 }
 
 Allowed actions:
+- "take_screenshot": When the user asks to take, capture, or screenshot the screen. Set "target": null and "folder": null.
 - "open_application": When user asks to open, launch, or run an app (e.g. "open spotify", "launch blender", "start chrome"). Set "target" to the app name. "folder": null.
+- "close_application": When user asks to close, exit, or quit an app (e.g. "close chrome", "quit spotify"). Set "target" to the app name. "folder": null.
 - "open_file": When user asks to open a specific file or folder (e.g. "open my resume pdf in Downloads", "open the photo on Desktop"). Set "target" to the file name, and "folder" to the folder name if mentioned (or null).
+- "delete_file": When user asks to delete or remove a file (e.g. "delete test.txt", "remove old_resume.pdf"). Set "target" to the file name, and "folder" to the folder name if mentioned (or null).
+- "delete_folder": When user asks to delete or remove a folder/directory. Set "target" to folder name.
+- "shutdown": When user asks to turn off or shut down the PC. "target": null, "folder": null.
+- "restart": When user asks to restart or reboot the PC. "target": null, "folder": null.
 - "play_music": When user asks to play a song, music, track, or artist on Spotify (e.g. "play Starboy", "play music by The Weeknd", "play Bohemian Rhapsody on Spotify"). Set "target" to the song or artist name. "folder": null.
 - "chat": For all normal conversations, greetings, questions, or help. "target": null, "folder": null.
 
