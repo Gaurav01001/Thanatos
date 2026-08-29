@@ -26,15 +26,15 @@ class VisionModel:
         return response.message.content.strip()
 
 
-if __name__ == "__main__":
-    vision = VisionModel()
+# if __name__ == "__main__":
+#     vision = VisionModel()
 
-    image_path = input("Enter screenshot path: ").strip()
+#     image_path = input("Enter screenshot path: ").strip()
 
-    result = vision.analyze(
-        image_path,
-        "Describe everything important you can see on this computer screen."
-    )
+#     result = vision.analyze(
+#         image_path,
+#         "Describe everything important you can see on this computer screen."
+#     )
 
-    print("\nVision:")
-    print(result)
+#     print("\nVision:")
+#     print(result)

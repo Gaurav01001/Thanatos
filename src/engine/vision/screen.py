@@ -4,7 +4,7 @@ import mss
 
 class ScreenCapture:
 
-    def __init__(self, save_directory: str = "screenshots"):
+    def __init__(self, save_directory: str = r"D:\My Pictures\Screenshots"):
         self.save_directory = save_directory
         os.makedirs(self.save_directory, exist_ok=True)
 

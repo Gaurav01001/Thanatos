@@ -7,6 +7,7 @@ from engine.executor.executor import Executor
 from engine.tts.text_to_speech import TextToSpeech
 from engine.security.validator import SecurityValidator
 from engine.vision.screen import ScreenCapture
+from engine.vision.vision import VisionModel
 
 logger = get_logger("engine")
 brain = Brain()
@@ -26,7 +27,7 @@ def main() -> None:
     validator = SecurityValidator()
     mode = "text"
     screen = ScreenCapture()
-
+    vision = VisionModel()
     def ask_confirmation() -> bool:
         response = input("Thanatos: Proceed? (yes/no): ").strip().lower()
 
@@ -110,13 +111,33 @@ def main() -> None:
         folder = intent.get("folder")
         
 
-        if action == "take_screenshot":
+        if action in ("take_screenshot", "analyze_image", "analyze_screen", "look_at_screen"):
             state_manager.transition_to(State.EXECUTING)
             try:
-                path = screen.capture()
-                msg = f"Screenshot saved: {path}"
-                print(f"Thanatos: {msg}")
-                tts.speak("Screenshot taken Successfully")
+                print("Thanatos: Looking at the screen...")
+                tts.speak("Let me take a look")
+
+                #1 capture the screen
+                image_path = screen.capture()
+
+                #2 send the screenshot to gemma
+                answer = vision.analyze(
+                image_path,f"""
+                    Look at this computer screenshot and answer the user's question.
+                    User's question:
+                    {message}
+                    Give a concise and accurate answer.
+                    Do not ask follow-up questions.
+                    Do not describe unrelated parts of the screen.
+                    If the requested information cannot be clearly seen, say so.
+                    """
+                )
+                #3 print response
+                print(f"Thanatos: {answer}")
+
+                #4 Speak vision 
+                tts.speak(answer)
+                
             except Exception as e:
                 msg = f"Failed to capture screenshot: {e}"
                 print(f"Thanatos: {msg}") 

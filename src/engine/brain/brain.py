@@ -69,6 +69,11 @@ Return a JSON object with EXACTLY these fields:
 }
 
 Allowed actions:
+- "analyze_screen": When the user asks what is visible on the screen,
+  asks about an error, code, application, game, text, or anything
+  that requires looking at the current screen.
+  Set "target" to null and "folder" to null.
+- "look_at_screen": When user asks to look at the screen, capture the screen, take a screenshot, or analyze the current screen content. Set "target": null and "folder": null.
 - "take_screenshot": When the user asks to take, capture, or screenshot the screen. Set "target": null and "folder": null.
 - "open_application": When user asks to open, launch, or run an app (e.g. "open spotify", "launch blender", "start chrome"). Set "target" to the app name. "folder": null.
 - "close_application": When user asks to close, exit, or quit an app (e.g. "close chrome", "quit spotify"). Set "target" to the app name. "folder": null.

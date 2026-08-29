@@ -1,4 +1,3 @@
-from fsspec import transaction
 import os
 from typing import Tuple, Optional
 
@@ -63,7 +62,10 @@ class SecurityValidator:
         "open_file",
         "play_music",
         "chat",
-        "take_screenshot"
+        "take_screenshot",
+        "analyze_image",
+        "analyze_screen",
+        "look_at_screen",
     }
 
     # Actions that should require user confirmation.
@@ -255,7 +257,7 @@ class SecurityValidator:
         action = action.strip().lower()
 
         # Screenshot action is always safe and needs no target.
-        if action == "take_screenshot":
+        if action in ("take_screenshot", "analyze_image", "analyze_screen", "look_at_screen"):
             return "SAFE", None
  
         # Unknown actions fail closed.
