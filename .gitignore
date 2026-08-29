@@ -65,3 +65,8 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+
+# Generated screenshots and audio
+screenshots/
+*.png
+output.wav
