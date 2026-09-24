@@ -66,6 +66,8 @@ class SecurityValidator:
         "analyze_image",
         "analyze_screen",
         "look_at_screen",
+        "index_document",
+        "ask_document",
     }
 
     # Actions that should require user confirmation.
@@ -313,8 +315,21 @@ class SecurityValidator:
 
             return "SAFE", None
 
+        # Document indexing validation.
+        if action == "index_document":
+            safe, reason = self.validate_file_path(target)
+            if not safe:
+                return "BLOCKED", reason
+
+            return "SAFE", None
+
+        # Document question asking validation.
+        if action == "ask_document":
+            return "SAFE", None
+
         # Fail closed.
         return "BLOCKED", "Action could not be validated."
+
 
 
 # Quick self-test

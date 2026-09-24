@@ -1,9 +1,24 @@
-import ollama
 import json
+
+import ollama
+
+try:
+    from engine.brain.knowledge_router import KnowledgeRouter
+    from engine.rag.rag_manager import RAGManager
+except (ImportError, ValueError):
+    # pyrefly: ignore [missing-import]
+    from src.engine.brain.knowledge_router import KnowledgeRouter
+
+    # pyrefly: ignore [missing-import]
+    from src.engine.rag.rag_manager import RAGManager
+
 
 class Brain: #created a blueprint or template for out brain of AI 
     def __init__(self):
         self._conversation = []
+        self._rag_manager = RAGManager()
+        self._router = KnowledgeRouter()
+        self.last_sources: str | None = None
         self._system_prompt = """
 You are Thanatos, a local AI assistant.
 
@@ -21,7 +36,31 @@ When the user needs a serious answer, drop the humor and be serious.
             "role" : "user",
             "content" : message
         })
-        
+
+        indexed_docs = self._rag_manager.list_indexed_documents()
+        route = self._router.classify(
+            query=message,
+            indexed_documents=indexed_docs,
+            conversation_history=self._conversation
+        )
+
+        # 1. DOCUMENT_RETRIEVAL or HYBRID -> Route to RAG knowledge base
+        if route in ("DOCUMENT_RETRIEVAL", "HYBRID"):
+            try:
+                answer, sources = self._rag_manager.ask(message)
+                self.last_sources = sources
+                ai_respond = str(answer or "")
+                self._conversation.append({
+                    "role" : "assistant",
+                    "content" : ai_respond
+                })
+                return ai_respond
+            except Exception:
+                # If retrieval fails unexpectedly, gracefully fall back to general chat
+                pass
+
+        # 2. CONVERSATIONAL -> Direct LLM chat
+        self.last_sources = None
         messages = [
             {"role": "system", "content": self._system_prompt},
             *self._conversation
@@ -31,16 +70,23 @@ When the user needs a serious answer, drop the humor and be serious.
                 model="qwen2.5-coder:7b",
                 messages=messages,
             )
-            ai_respond = response.message.content
+            raw_content = (
+                response.message.content
+                if hasattr(response, "message")
+                else response["message"]["content"]
+            )
+            ai_respond = str(raw_content or "")
+            self._conversation.append({
+                "role" : "assistant",
+                "content" : ai_respond
+            })
+            return ai_respond
         except Exception as e:
-            ai_respond = f"Error , Something went wrong : {e}"
+            if self._conversation and self._conversation[-1]["role"] == "user":
+                self._conversation.pop()
+            return f"Error , Something went wrong : {e}"
 
-        self._conversation.append({
-            "role" : "assistant",
-            "content" : ai_respond
-        })
 
-        return ai_respond
 
     def clear_memory(self) -> None:
         self._conversation = []
@@ -58,7 +104,7 @@ When the user needs a serious answer, drop the humor and be serious.
 #         ↓
 #      Executor
     def get_intent(self, message: str) -> dict:
-        system_prompt = """You are Thanatos an intent classifier for a desktop AI assistant.
+        system_prompt = r"""You are Thanatos an intent classifier for a desktop AI assistant.
 Analyze the user's message and determine what they want to do.
 
 Return a JSON object with EXACTLY these fields:
@@ -83,6 +129,8 @@ Allowed actions:
 - "shutdown": When user asks to turn off or shut down the PC. "target": null, "folder": null.
 - "restart": When user asks to restart or reboot the PC. "target": null, "folder": null.
 - "play_music": When user asks to play a song, music, track, or artist on Spotify (e.g. "play Starboy", "play music by The Weeknd", "play Bohemian Rhapsody on Spotify"). Set "target" to the song or artist name. "folder": null.
+- "index_document": When the user asks to index, add, or ingest a document into Thanatos's knowledge base (e.g. "index D:\Documents\ml.pdf"). Set "target" to the full file path and "folder" to null.
+- "ask_document": When the user asks a question about the indexed document or knowledge base (e.g. "what does the document say about AI?", "ask document what is machine learning", "search document for transformers"). Set "target" to the user's question and "folder" to null.
 - "chat": For all normal conversations, greetings, questions, or help. "target": null, "folder": null.
 
 Return ONLY valid raw JSON."""
@@ -96,11 +144,33 @@ Return ONLY valid raw JSON."""
                 ],
                 format="json"
             )
-            return json.loads(response.message.content)
+            raw_content = (
+                response.message.content
+                if hasattr(response, "message")
+                else response["message"]["content"]
+            )
+            content = str(raw_content or "{}")
+            result = json.loads(content)
+            if isinstance(result, dict):
+                return result
+            return {"action": "chat", "target": None, "folder": None}
         except Exception:
             return {"action": "chat", "target": None, "folder": None}
 
     
+    def index_document(self, filepath: str) -> str:
+        try:
+            self._rag_manager.index_document(filepath)
+            return f"Document indexed successfully: {filepath}"
+        except Exception as e:
+            return f"Error indexing document: {e}"
+            
+    def ask_document(self, question: str) -> tuple[str, str]:
+        try:
+            answer, sources = self._rag_manager.ask(question)
+            return str(answer), str(sources)
+        except Exception as e:
+            return f"Error asking document: {e}", ""
             #      THANATOS
             #         │
             #  ┌──────┴──────┐

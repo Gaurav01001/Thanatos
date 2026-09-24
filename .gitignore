@@ -83,4 +83,7 @@ evaluate_rag.py
 populate_qdrant.py
 benchmark_real.py
 
+# Architecture and implementation plans
+*RAG_IMPLEMENTATION_PLAN.md
+
  

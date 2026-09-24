@@ -1,11 +1,11 @@
+from engine.audio.audio import AudioInput
+from engine.brain.brain import Brain
 from engine.core.logging import get_logger
 from engine.core.state import State, StateManager
-from engine.brain.brain import Brain 
-from engine.audio.audio import AudioInput
-from engine.stt.transcriber import Transcriber
 from engine.executor.executor import Executor
-from engine.tts.text_to_speech import TextToSpeech
 from engine.security.validator import SecurityValidator
+from engine.stt.transcriber import Transcriber
+from engine.tts.text_to_speech import TextToSpeech
 from engine.vision.screen import ScreenCapture
 from engine.vision.vision import VisionModel
 
@@ -174,7 +174,44 @@ def main() -> None:
                 tts.speak(msg)
             state_manager.transition_to(State.IDLE)
             continue
+        
+        # index document into Rag Knowledge base
+        elif action == "index_document":
+            if not target:
+                print("Thanatos: Please provide a valid file path to index.")
+                tts.speak("Please provide a file path to index.")
+                continue
 
+            state_manager.transition_to(State.EXECUTING)
+            print("Thanatos: Indexing document...")
+            tts.speak("Indexing document...")
+
+            try:
+                result = brain.index_document(target)
+                print(f"Thanatos: {result}")
+                tts.speak(result)
+            except Exception as e:
+                msg = f"Failed to index document: {e}"
+                print(f"Thanatos: {msg}")
+                tts.speak("Failed to index document")
+            state_manager.transition_to(State.IDLE)
+            continue
+
+        # Query RAG Knowledge base
+        elif action == "ask_document":
+            state_manager.transition_to(State.THINKING)
+            print("Thanatos: Searching knowledge base...", end="", flush=True)
+            tts.speak("Checking the documents...")
+            query = target if target else message
+            answer, sources = brain.ask_document(query)
+            print("\r" + " " * 35 + "\r", end="", flush=True)
+            print(f"Thanatos: {answer}")
+            if sources:
+                print(f"\n{sources}")
+            tts.speak(answer)
+            state_manager.transition_to(State.IDLE)
+            continue
+             
         # Play Music on Spotify
         elif action == "play_music" and target:
             state_manager.transition_to(State.EXECUTING)

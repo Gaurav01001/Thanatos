@@ -1,0 +1,13 @@
+{
+  "include": [
+    "src",
+    "tests"
+  ],
+  "extraPaths": [
+    ".",
+    "src",
+    "src/engine/rag/ingestion"
+  ],
+  "venvPath": ".",
+  "venv": ".venv"
+}
