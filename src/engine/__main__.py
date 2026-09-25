@@ -230,7 +230,7 @@ def main() -> None:
         state_manager.transition_to(State.THINKING)
         print("Thanatos: Thinking...", end="", flush=True)
         try:
-            response = brain.respond(message)
+            response, sources = brain.respond(message)
             state_manager.transition_to(State.IDLE)
         except Exception as e:
             state_manager.transition_to(State.ERROR)
@@ -241,6 +241,8 @@ def main() -> None:
         # Erase "Thanatos: Thinking..." before printing & speaking
         print("\r" + " " * 30 + "\r", end="", flush=True)
         print(f"Thanatos: {response}")
+        if sources:
+            print(f"\n{sources}")
         tts.speak(response)
 
 if __name__ == "__main__": 

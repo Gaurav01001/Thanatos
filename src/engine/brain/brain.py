@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import json
 
 import ollama
 
 try:
     from engine.brain.knowledge_router import KnowledgeRouter
+    from engine.brain.query_condenser import QueryCondenser
     from engine.rag.rag_manager import RAGManager
 except (ImportError, ValueError):
     # pyrefly: ignore [missing-import]
     from src.engine.brain.knowledge_router import KnowledgeRouter
+
+    # pyrefly: ignore [missing-import]
+    from src.engine.brain.query_condenser import QueryCondenser
 
     # pyrefly: ignore [missing-import]
     from src.engine.rag.rag_manager import RAGManager
@@ -18,6 +24,7 @@ class Brain: #created a blueprint or template for out brain of AI
         self._conversation = []
         self._rag_manager = RAGManager()
         self._router = KnowledgeRouter()
+        self._condenser = QueryCondenser()
         self.last_sources: str | None = None
         self._system_prompt = """
 You are Thanatos, a local AI assistant.
@@ -31,7 +38,7 @@ Speak naturally and conversationally, not like a corporate assistant.
 Never identify yourself as Qwen.
 When the user needs a serious answer, drop the humor and be serious.
 """
-    def respond(self, message: str) -> str: #message is string inside method respond
+    def respond(self, message: str) -> tuple[str, str | None]: #message is string inside method respond
         self._conversation.append({
             "role" : "user",
             "content" : message
@@ -47,15 +54,20 @@ When the user needs a serious answer, drop the humor and be serious.
         # 1. DOCUMENT_RETRIEVAL or HYBRID -> Route to RAG knowledge base
         if route in ("DOCUMENT_RETRIEVAL", "HYBRID"):
             try:
-                answer, sources = self._rag_manager.ask(message)
+                # Reformulate ambiguous follow-ups into standalone queries
+                retrieval_query = self._condenser.condense(
+                    conversation_history=self._conversation[:-1],
+                    follow_up_query=message,
+                )
+                answer, sources = self._rag_manager.ask(retrieval_query)
                 self.last_sources = sources
                 ai_respond = str(answer or "")
                 self._conversation.append({
                     "role" : "assistant",
                     "content" : ai_respond
                 })
-                return ai_respond
-            except Exception:
+                return ai_respond, sources
+            except Exception:  # noqa: BLE001, S110
                 # If retrieval fails unexpectedly, gracefully fall back to general chat
                 pass
 
@@ -80,11 +92,11 @@ When the user needs a serious answer, drop the humor and be serious.
                 "role" : "assistant",
                 "content" : ai_respond
             })
-            return ai_respond
+            return ai_respond, None
         except Exception as e:
             if self._conversation and self._conversation[-1]["role"] == "user":
                 self._conversation.pop()
-            return f"Error , Something went wrong : {e}"
+            return f"Error , Something went wrong : {e}", None
 
 
 
