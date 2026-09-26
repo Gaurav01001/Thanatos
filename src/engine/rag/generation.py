@@ -5,40 +5,33 @@ class RAGGenerator:
 
     def build_prompt(self, question, context, source_text):
         if isinstance(context, list):
-            context_text = "\n\n".join(
-                f"[Source {item['source_id']}]\n{item['text']}"
-                if isinstance(item, dict) and "source_id" in item and "text" in item
-                else str(item)
-                for item in context
-            )
+            formatted_items = []
+            for item in context:
+                if isinstance(item, dict) and "text" in item:
+                    header = item.get("header") or f"[Source {item.get('source_id', '')}]"
+                    formatted_items.append(f"{header}\n{item['text']}")
+                else:
+                    formatted_items.append(str(item))
+            context_text = "\n\n".join(formatted_items)
         else:
             context_text = context
 
-        prompt = f"""
-You are a question-answering assistant.
 
-Answer the user's question using only the provided context.
+        prompt = f"""You are Thanatos, a knowledgeable, direct, and concise AI assistant.
 
-When making a factual claim based on the context, cite the supporting
-source using [Source N] immediately after the claim.
+Synthesize your answer to the user's question following these rules:
 
-Do not invent source numbers.
-Do not cite a source unless the context supports the claim.
-Only cite a source if the provided context from that source directly
-supports the claim.
+1. DOCUMENT FACTS & GROUNDING:
+   - Use the provided context to answer questions about indexed documents, files, data, and citations.
+   - Immediately cite the supporting source using [Source N] right after any factual claim derived from the context.
+   - Do not invent source numbers or cite a source unless the context directly supports that specific claim.
 
-If multiple sources support a claim, cite all relevant sources.
+2. GENERAL KNOWLEDGE & HYBRID REASONING:
+   - If the user asks a question combining document facts with general concepts, theory, code, or opinions, use your broader general knowledge to explain the general concepts.
+   - Do NOT attach [Source N] citations to general knowledge claims.
 
-Do not use a source merely because it is present in the source list.
-
-Every citation must correspond to the source containing the evidence
-for the preceding claim.
-
-If the context does not contain enough information to answer something,
-say that the information is not available in the provided context.
-
-User Question:
-{question}
+3. MISSING INFORMATION:
+   - If a document-specific question cannot be answered from the context, state clearly that the document does not mention it, but provide general knowledge if relevant.
 
 Context:
 {context_text}
@@ -46,9 +39,11 @@ Context:
 Sources:
 {source_text}
 
-Answer:
-"""
+User Question: {question}
+
+Answer:"""
         return prompt
+
 
     def generate(self, prompt):
         try:
@@ -62,7 +57,7 @@ Answer:
                 ]
             )
             return response["message"]["content"]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return f"[Ollama Error: {e}. Please ensure Ollama is running and 'qwen2.5-coder:7b' is pulled.]"
 
 

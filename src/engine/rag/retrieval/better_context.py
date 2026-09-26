@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -112,19 +114,28 @@ class BetterContext:
         source_map = {}
 
         for source_id, chunk in enumerate(kept_chunks, 1):
+            raw_source = chunk.get("source" , "")
+            file_name = Path(raw_source).name if raw_source else "Document"
+
+            pages = chunk.get("pages",[])
+            page_info = f"PAGE: {', '.join(map(str, pages))}" if pages else "PAGE: N/A"
+            header = f"--- [Source {source_id}] DOCUMENT: {file_name} | {page_info} ---"
+            
             context_entry = {
                 "source_id": source_id,
-                "file": chunk["source"],
-                "pages": chunk["pages"],
-                "text": chunk["text"]
+                "file": raw_source,
+                "filename": file_name,
+                "pages": pages,
+                "header": header,
+                "text": chunk["text"],
             }
 
             context.append(context_entry)
 
             source_map[source_id] = {
-                "chunk_id": chunk["id"],
-                "file": chunk["source"],
-                "pages": chunk["pages"]
+                "chunk_id": chunk.get("id"),
+                "file": raw_source,
+                "pages": pages,
             }
 
         return context, source_map
