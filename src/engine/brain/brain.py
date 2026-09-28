@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import ollama
 
+logger = logging.getLogger(__name__)
 try:
     from engine.brain.knowledge_router import KnowledgeRouter
     from engine.brain.query_condenser import QueryCondenser
@@ -22,7 +24,11 @@ except (ImportError, ValueError):
 class Brain: #created a blueprint or template for out brain of AI 
     def __init__(self):
         self._conversation = []
-        self._rag_manager = RAGManager()
+        try:
+            self._rag_manager = RAGManager()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to initialize RAGManager in Brain: %s. Running in chat-only mode.", e)
+            self._rag_manager = None
         self._router = KnowledgeRouter()
         self._condenser = QueryCondenser()
         self.last_sources: str | None = None
@@ -44,7 +50,13 @@ When the user needs a serious answer, drop the humor and be serious.
             "content" : message
         })
 
-        indexed_docs = self._rag_manager.list_indexed_documents()
+        indexed_docs = []
+        if self._rag_manager and getattr(self._rag_manager, "is_healthy", True):
+            try:
+                indexed_docs = self._rag_manager.list_indexed_documents()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Error listing indexed documents: %s", e)
+
         route = self._router.classify(
             query=message,
             indexed_documents=indexed_docs,
@@ -52,7 +64,7 @@ When the user needs a serious answer, drop the humor and be serious.
         )
 
         # 1. DOCUMENT_RETRIEVAL or HYBRID -> Route to RAG knowledge base
-        if route in ("DOCUMENT_RETRIEVAL", "HYBRID"):
+        if route in ("DOCUMENT_RETRIEVAL", "HYBRID") and self._rag_manager:
             try:
                 # Reformulate ambiguous follow-ups into standalone queries
                 retrieval_query = self._condenser.condense(
@@ -67,9 +79,9 @@ When the user needs a serious answer, drop the humor and be serious.
                     "content" : ai_respond
                 })
                 return ai_respond, sources
-            except Exception:  # noqa: BLE001, S110
-                # If retrieval fails unexpectedly, gracefully fall back to general chat
-                pass
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Document retrieval failed (%s). Gracefully degrading to direct LLM chat.", e)
+                # If retrieval fails unexpectedly, gracefully fall back to general chat below
 
         # 2. CONVERSATIONAL -> Direct LLM chat
         self.last_sources = None
@@ -93,7 +105,7 @@ When the user needs a serious answer, drop the humor and be serious.
                 "content" : ai_respond
             })
             return ai_respond, None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if self._conversation and self._conversation[-1]["role"] == "user":
                 self._conversation.pop()
             return f"Error , Something went wrong : {e}", None
@@ -166,7 +178,7 @@ Return ONLY valid raw JSON."""
             if isinstance(result, dict):
                 return result
             return {"action": "chat", "target": None, "folder": None}
-        except Exception:
+        except Exception:  # noqa: BLE001
             return {"action": "chat", "target": None, "folder": None}
 
     
@@ -174,14 +186,14 @@ Return ONLY valid raw JSON."""
         try:
             self._rag_manager.index_document(filepath)
             return f"Document indexed successfully: {filepath}"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return f"Error indexing document: {e}"
             
     def ask_document(self, question: str) -> tuple[str, str]:
         try:
             answer, sources = self._rag_manager.ask(question)
             return str(answer), str(sources)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return f"Error asking document: {e}", ""
             #      THANATOS
             #         │
