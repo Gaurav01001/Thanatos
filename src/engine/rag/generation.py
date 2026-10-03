@@ -23,7 +23,7 @@ Synthesize your answer to the user's question following these rules:
 
 1. DOCUMENT FACTS & GROUNDING:
    - Use the provided context to answer questions about indexed documents, files, data, and citations.
-   - Immediately cite the supporting source using [Source N] right after any factual claim derived from the context.
+   - MANDATORY: Whenever you mention any fact, author, institution, or detail from the context, you MUST include [Source N] (e.g. [Source 1]) immediately after that statement.
    - Do not invent source numbers or cite a source unless the context directly supports that specific claim.
 
 2. GENERAL KNOWLEDGE & HYBRID REASONING:
@@ -54,7 +54,8 @@ Answer:"""
                         "role": "user",
                         "content": prompt
                     }
-                ]
+                ],
+                options={"temperature": 0.0}
             )
             return response["message"]["content"]
         except Exception as e:  # noqa: BLE001

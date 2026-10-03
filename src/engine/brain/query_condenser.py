@@ -35,11 +35,12 @@ class QueryCondenser:
         system_prompt = """You are a search query reformulation specialist.
 Given the chat history and the user's latest follow-up question, rewrite the follow-up question into a single, standalone search query that contains all necessary subjects and document references.
 Rules:
-1. Resolve all pronouns (it, that, they, them, he, she, this).
-2. Retain document names, authors, or key topics mentioned in the chat.
-3. DO NOT answer the question.
-4. DO NOT explain your reasoning.
-5. Return ONLY the reformulated question on a single line."""
+1. If the follow-up question is ALREADY completely standalone, self-contained, and has no ambiguous pronouns, return it EXACTLY as-is without altering it.
+2. Resolve all pronouns (it, that, they, them, he, she, this, these, those, his, her, their).
+3. Retain document names, authors, or key topics mentioned in the chat.
+4. DO NOT answer the question.
+5. DO NOT explain your reasoning.
+6. Return ONLY the question on a single line."""
         user_prompt = f"""Chat History:
 {history_str}
 

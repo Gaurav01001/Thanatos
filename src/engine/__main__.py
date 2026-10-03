@@ -138,7 +138,7 @@ def main() -> None:
                 #4 Speak vision 
                 tts.speak(answer)
                 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 msg = f"Failed to capture screenshot: {e}"
                 print(f"Thanatos: {msg}") 
                 tts.speak("Failed to capture screenshot")
@@ -190,25 +190,10 @@ def main() -> None:
                 result = brain.index_document(target)
                 print(f"Thanatos: {result}")
                 tts.speak(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 msg = f"Failed to index document: {e}"
                 print(f"Thanatos: {msg}")
                 tts.speak("Failed to index document")
-            state_manager.transition_to(State.IDLE)
-            continue
-
-        # Query RAG Knowledge base
-        elif action == "ask_document":
-            state_manager.transition_to(State.THINKING)
-            print("Thanatos: Searching knowledge base...", end="", flush=True)
-            tts.speak("Checking the documents...")
-            query = target if target else message
-            answer, sources = brain.ask_document(query)
-            print("\r" + " " * 35 + "\r", end="", flush=True)
-            print(f"Thanatos: {answer}")
-            if sources:
-                print(f"\n{sources}")
-            tts.speak(answer)
             state_manager.transition_to(State.IDLE)
             continue
              
@@ -232,7 +217,7 @@ def main() -> None:
         try:
             response, sources = brain.respond(message)
             state_manager.transition_to(State.IDLE)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             state_manager.transition_to(State.ERROR)
             print(f"Thanatos: Something went wrong: {e}")
             state_manager.transition_to(State.IDLE)

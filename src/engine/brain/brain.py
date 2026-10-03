@@ -60,7 +60,7 @@ When the user needs a serious answer, drop the humor and be serious.
         route = self._router.classify(
             query=message,
             indexed_documents=indexed_docs,
-            conversation_history=self._conversation
+            conversation_history=self._conversation[:-1]
         )
 
         # 1. DOCUMENT_RETRIEVAL or HYBRID -> Route to RAG knowledge base
@@ -147,17 +147,16 @@ Allowed actions:
 - "take_screenshot": When the user asks to take, capture, or screenshot the screen. Set "target": null and "folder": null.
 - "open_application": When user asks to open, launch, or run an app (e.g. "open spotify", "launch blender", "start chrome"). Set "target" to the app name. "folder": null.
 - "close_application": When user asks to close, exit, or quit an app (e.g. "close chrome", "quit spotify"). Set "target" to the app name. "folder": null.
-- "open_file": When user asks to open a specific file or folder (e.g. "open my resume pdf in Downloads", "open the photo on Desktop"). Set "target" to the file name, and "folder" to the folder name if mentioned (or null).
+- "open_file": When user explicitly asks to open, launch, or view a file or folder on disk (e.g. "open my resume pdf in Downloads", "open the photo on Desktop"). DO NOT use this for questions asking about the contents or authors of a document. Set "target" to the file name, and "folder" to the folder name if mentioned (or null).
 - "delete_file": When user asks to delete or remove a file (e.g. "delete test.txt", "remove old_resume.pdf"). Set "target" to the file name, and "folder" to the folder name if mentioned (or null).
 - "delete_folder": When user asks to delete or remove a folder/directory. Set "target" to folder name.
 - "shutdown": When user asks to turn off or shut down the PC. "target": null, "folder": null.
 - "restart": When user asks to restart or reboot the PC. "target": null, "folder": null.
 - "play_music": When user asks to play a song, music, track, or artist on Spotify (e.g. "play Starboy", "play music by The Weeknd", "play Bohemian Rhapsody on Spotify"). Set "target" to the song or artist name. "folder": null.
 - "index_document": When the user asks to index, add, or ingest a document into Thanatos's knowledge base (e.g. "index D:\Documents\ml.pdf"). Set "target" to the full file path and "folder" to null.
-- "ask_document": When the user asks a question about the indexed document or knowledge base (e.g. "what does the document say about AI?", "ask document what is machine learning", "search document for transformers"). Set "target" to the user's question and "folder" to null.
-- "chat": For all normal conversations, greetings, questions, or help. "target": null, "folder": null.
+- "chat": For all conversations, greetings, general questions, asking about document contents/authors/facts (e.g. "who prepared notes in aiml.pdf?", "what does the PDF say?"), or help. "target": null, "folder": null.
 
-Return ONLY valid raw JSON."""
+Return ONLY a JSON object:"""
 
         try:
             response = ollama.chat(

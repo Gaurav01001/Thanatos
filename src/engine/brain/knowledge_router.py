@@ -62,32 +62,47 @@ class KnowledgeRouter:
             return "CONVERSATIONAL"
 
         # LLM Classification for ambiguous queries
-        return self._classify_with_llm(query, indexed_documents)
+        return self._classify_with_llm(query, indexed_documents, conversation_history)
 
-    def _classify_with_llm(self, query: str, indexed_documents: list[str] | None = None) -> str:
+    def _classify_with_llm(
+        self,
+        query: str,
+        indexed_documents: list[str] | None = None,
+        conversation_history: list | None = None,
+    ) -> str:
         doc_context = ""
         if indexed_documents:
             doc_context = f"Indexed document filenames: {', '.join(indexed_documents)}"
 
         system_prompt = f"""You are a query classifier for an AI assistant.
-Determine whether answering the user query requires consulting indexed documents.
+Determine whether answering the latest user query requires consulting indexed documents.
 
 {doc_context}
 
+Important Rule:
+If the user's latest query is a follow-up question (using pronouns like 'he', 'she', 'it', 'they', 'this', or asking for details) about a person, topic, or file discussed from indexed documents in recent turns, classify it as "DOCUMENT_RETRIEVAL".
+
 Categories:
-1. "CONVERSATIONAL": General chit-chat, programming help, general knowledge, math, definitions not tied to a specific file.
-2. "DOCUMENT_RETRIEVAL": Asking for specific information, data, summaries, or facts from user's indexed documents.
+1. "CONVERSATIONAL": General chit-chat, programming help, general knowledge not tied to user's documents.
+2. "DOCUMENT_RETRIEVAL": Asking for specific information, data, summaries, or facts from user's indexed documents, OR follow-up questions about entities/topics discussed from the documents.
 3. "HYBRID": Needs both general conceptual reasoning/theory AND specific document facts or comparison.
 
 Return ONLY a JSON object: {{"route": "CONVERSATIONAL" | "DOCUMENT_RETRIEVAL" | "HYBRID"}}"""
 
+        messages = [{"role": "system", "content": system_prompt}]
+        if conversation_history:
+            for m in conversation_history[-4:]:
+                role = "user" if m.get("role") == "user" else "assistant"
+                content = str(m.get("content", ""))
+                if len(content) > 300:
+                    content = content[:300] + "..."
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": query})
+
         try:
             response = ollama.chat(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query}
-                ],
+                messages=messages,
                 format="json",
                 options={"temperature": 0.0}
             )
