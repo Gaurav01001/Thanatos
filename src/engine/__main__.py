@@ -1,13 +1,17 @@
+from engine.audio.audio import AudioInput
+from engine.brain.brain import Brain
 from engine.core.logging import get_logger
 from engine.core.state import State, StateManager
-from engine.brain.brain import Brain 
-from engine.audio.audio import AudioInput
-from engine.stt.transcriber import Transcriber
 from engine.executor.executor import Executor
+from engine.security.validator import SecurityValidator
+from engine.stt.transcriber import Transcriber
 from engine.tts.text_to_speech import TextToSpeech
+from engine.vision.screen import ScreenCapture
+from engine.vision.vision import VisionModel
 
 logger = get_logger("engine")
 brain = Brain()
+
 
 def main() -> None:
     logger.info("Thanatos Starting...")
@@ -20,8 +24,21 @@ def main() -> None:
     audio_input = AudioInput()
     transcriber = Transcriber()
     tts = TextToSpeech()
+    validator = SecurityValidator()
     mode = "text"
+    is_muted = False
+    screen = ScreenCapture()
+    vision = VisionModel()
 
+    def speak(text: str) -> None:
+        if not is_muted and text:
+            tts.speak(text)
+
+    def ask_confirmation() -> bool:
+        response = input("Thanatos: Proceed? (yes/no): ").strip().lower()
+
+        return response in ("yes", "y")
+    
     while state_manager.state == State.IDLE:
 
         # ----------------------------------------------------
@@ -46,8 +63,8 @@ def main() -> None:
             try:
                 user_input = input("You: ").strip()
             except (KeyboardInterrupt, EOFError):
-                print("\nThanatos: Tataa, byeee!")
-                tts.speak("Tataa, byeee!")
+                print("\nThanatos: Glad to assist you!")
+                tts.speak("Glad to assist you!")
                 break
 
             # Pressing Enter on empty prompt switches to Voice Mode
@@ -58,33 +75,93 @@ def main() -> None:
             message = user_input
 
         # ----------------------------------------------------
-        # 2. BUILT-IN TEXT COMMANDS (clear, status, exit)
+        # 2. BUILT-IN TEXT COMMANDS (clear, status, mute, exit)
         # ----------------------------------------------------
         cleaned = message.lower().strip().rstrip(".!?")
         if cleaned == "clear":
             print("Thanatos: Cleared! All memory Erased")
             brain.clear_memory()
-            tts.speak("Memory cleared.")
+            speak("Memory cleared.")
             continue
         elif cleaned == "status":
             print(f"Thanatos State : {state_manager.state.value}")
-            tts.speak(f"Current state is {state_manager.state.value}")
+            speak(f"Current state is {state_manager.state.value}")
+            continue
+        elif cleaned in ("/mute", "/silent", "mute", "silent"):
+            is_muted = True
+            print("Thanatos: Audio muted. Operating in silent display mode.")
+            continue
+        elif cleaned in ("/voice", "/unmute", "unmute"):
+            is_muted = False
+            print("Thanatos: Voice audio enabled.")
+            tts.speak("Voice enabled.")
             continue
         elif cleaned in ("exit", "quit", "bye", "goodbye"):
-            print("Thanatos: Tataa, byeee!")
-            tts.speak("Tataa, byeee!")
+            print("Thanatos: Glad to assist you!")
+            speak("Glad to assist you!")
             break
 
         # ----------------------------------------------------
-        # 3. INTENT DETECTION & ACTION EXECUTION (Open Apps/Files)
+        # 3. INTENT DETECTION & SECURITY VALIDATION
         # ----------------------------------------------------
         intent = brain.get_intent(message)
+        # Validate intent before executing any actions
+        
+        status, reason = validator.validate_intent(intent)
+        if status == "BLOCKED":
+            print(f"Thanatos: {reason}")
+            tts.speak(reason)
+            continue
+        elif status == "CONFIRM":
+            print(f"Thanatos: {reason}")
+            tts.speak(reason)
+
+            if not ask_confirmation():
+                print("Thanatos: Cancelled.")
+                tts.speak("Cancelled.")
+                continue
+
         action = intent.get("action")
         target = intent.get("target")
         folder = intent.get("folder")
+        
 
+        if action in ("take_screenshot", "analyze_image", "analyze_screen", "look_at_screen"):
+            state_manager.transition_to(State.EXECUTING)
+            try:
+                print("Thanatos: Looking at the screen...")
+                tts.speak("Let me take a look")
+
+                #1 capture the screen
+                image_path = screen.capture()
+
+                #2 send the screenshot to gemma
+                answer = vision.analyze(
+                image_path,f"""
+                    Look at this computer screenshot and answer the user's question.
+                    User's question:
+                    {message}
+                    Give a concise and accurate answer.
+                    Do not ask follow-up questions.
+                    Do not describe unrelated parts of the screen.
+                    If the requested information cannot be clearly seen, say so.
+                    """
+                )
+                #3 print response
+                print(f"Thanatos: {answer}")
+
+                #4 Speak vision 
+                tts.speak(answer)
+                
+            except Exception as e:  # noqa: BLE001
+                msg = f"Failed to capture screenshot: {e}"
+                print(f"Thanatos: {msg}") 
+                tts.speak("Failed to capture screenshot")
+            state_manager.transition_to(State.IDLE)
+            continue
+            
         # Open Application
-        if action == "open_application" and target:
+        elif action == "open_application" and target:
             state_manager.transition_to(State.EXECUTING)
             success = executor.open_application(target)
             if success:
@@ -112,35 +189,61 @@ def main() -> None:
                 tts.speak(msg)
             state_manager.transition_to(State.IDLE)
             continue
+        
+        # index document into Rag Knowledge base
+        elif action == "index_document":
+            if not target:
+                print("Thanatos: Please provide a valid file path to index.")
+                tts.speak("Please provide a file path to index.")
+                continue
 
+            state_manager.transition_to(State.EXECUTING)
+            print("Thanatos: Indexing document...")
+            tts.speak("Indexing document...")
+
+            try:
+                result = brain.index_document(target)
+                print(f"Thanatos: {result}")
+                tts.speak(result)
+            except Exception as e:  # noqa: BLE001
+                msg = f"Failed to index document: {e}"
+                print(f"Thanatos: {msg}")
+                tts.speak("Failed to index document")
+            state_manager.transition_to(State.IDLE)
+            continue
+             
         # Play Music on Spotify
         elif action == "play_music" and target:
             state_manager.transition_to(State.EXECUTING)
-            msg = f"Playing {target} on Spotify"
+            success = executor.play_spotify(target)
+            if success:
+                msg = f"Playing {target} on Spotify"
+            else:
+                msg = f"I couldn't play {target} on Spotify"
             print(f"Thanatos: {msg}")
             tts.speak(msg)
-            executor.play_spotify(target)
             state_manager.transition_to(State.IDLE)
-            continue
-
+            continue  
         # ----------------------------------------------------
-        # 4. CHAT CONVERSATION (Brain LLM + Voice Output)
+        # 4. CHAT CONVERSATION (Brain LLM + Dual-Track Output)
         # ----------------------------------------------------
         state_manager.transition_to(State.THINKING)
         print("Thanatos: Thinking...", end="", flush=True)
         try:
             response = brain.respond(message)
             state_manager.transition_to(State.IDLE)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             state_manager.transition_to(State.ERROR)
             print(f"Thanatos: Something went wrong: {e}")
             state_manager.transition_to(State.IDLE)
             continue
 
-        # Erase "Thanatos: Thinking..." before printing & speaking
+        # Erase "Thanatos: Thinking..." before printing
         print("\r" + " " * 30 + "\r", end="", flush=True)
-        print(f"Thanatos: {response}")
-        tts.speak(response)
+        print(f"Thanatos: {response.display_text}")
+        if response.sources:
+            print(f"\n{response.sources}")
+        speak(response.speech_text)
 
 if __name__ == "__main__": 
     main()

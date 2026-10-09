@@ -65,3 +65,25 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+
+# Generated screenshots and audio
+screenshots/
+*.png
+*.wav
+output.wav
+
+# Local Vector Database & Benchmark Data
+qdrant_data/
+benchmark_data/
+
+# Local tests and development scripts
+tests/
+test_*.py
+evaluate_rag.py
+populate_qdrant.py
+benchmark_real.py
+
+# Architecture and implementation plans
+*RAG_IMPLEMENTATION_PLAN.md
+
+ 
