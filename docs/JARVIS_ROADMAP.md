@@ -124,8 +124,14 @@ flowchart TD
 
 ---
 
-### Stage 2: Response Object Architecture & Dual-Track Output (CURRENT TARGET)
+### Stage 2: Response Object Architecture & Dual-Track Output (Status: ✅ COMPLETED)
 - **Goal**: Cleanly decouple what is seen from what is spoken, and provide instant voice/silent toggles.
+- **Implemented & Verified**:
+  - `src/engine/core/response.py`: `Response` dataclass with `display_text`, `speech_text`, `sources`, and `__iter__` backwards compatibility.
+  - `src/engine/brain/brain.py`: Zero-latency `_create_spoken_summary()` punchline extraction with visual cues; `Brain.respond()` returning `Response`.
+  - `src/engine/__main__.py`: Added `speak()` audio dispatcher respecting `is_muted`.
+  - Added instant `/mute` / `/silent` and `/voice` / `/unmute` commands.
+  - Dual-track display in terminal (`response.display_text` + sources) and spoken punchlines (`response.speech_text`).
 - **Implementation**:
   1. Define `src/engine/core/response.py`:
      ```python

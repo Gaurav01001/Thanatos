@@ -26,8 +26,14 @@ def main() -> None:
     tts = TextToSpeech()
     validator = SecurityValidator()
     mode = "text"
+    is_muted = False
     screen = ScreenCapture()
     vision = VisionModel()
+
+    def speak(text: str) -> None:
+        if not is_muted and text:
+            tts.speak(text)
+
     def ask_confirmation() -> bool:
         response = input("Thanatos: Proceed? (yes/no): ").strip().lower()
 
@@ -69,29 +75,38 @@ def main() -> None:
             message = user_input
 
         # ----------------------------------------------------
-        # 2. BUILT-IN TEXT COMMANDS (clear, status, exit)
+        # 2. BUILT-IN TEXT COMMANDS (clear, status, mute, exit)
         # ----------------------------------------------------
         cleaned = message.lower().strip().rstrip(".!?")
         if cleaned == "clear":
             print("Thanatos: Cleared! All memory Erased")
             brain.clear_memory()
-            tts.speak("Memory cleared.")
+            speak("Memory cleared.")
             continue
         elif cleaned == "status":
             print(f"Thanatos State : {state_manager.state.value}")
-            tts.speak(f"Current state is {state_manager.state.value}")
+            speak(f"Current state is {state_manager.state.value}")
+            continue
+        elif cleaned in ("/mute", "/silent", "mute", "silent"):
+            is_muted = True
+            print("Thanatos: Audio muted. Operating in silent display mode.")
+            continue
+        elif cleaned in ("/voice", "/unmute", "unmute"):
+            is_muted = False
+            print("Thanatos: Voice audio enabled.")
+            tts.speak("Voice enabled.")
             continue
         elif cleaned in ("exit", "quit", "bye", "goodbye"):
             print("Thanatos: Glad to assist you!")
-            tts.speak("Glad to assist you!")
+            speak("Glad to assist you!")
             break
 
         # ----------------------------------------------------
         # 3. INTENT DETECTION & SECURITY VALIDATION
         # ----------------------------------------------------
         intent = brain.get_intent(message)
-
         # Validate intent before executing any actions
+        
         status, reason = validator.validate_intent(intent)
         if status == "BLOCKED":
             print(f"Thanatos: {reason}")
@@ -210,12 +225,12 @@ def main() -> None:
             state_manager.transition_to(State.IDLE)
             continue  
         # ----------------------------------------------------
-        # 4. CHAT CONVERSATION (Brain LLM + Voice Output)
+        # 4. CHAT CONVERSATION (Brain LLM + Dual-Track Output)
         # ----------------------------------------------------
         state_manager.transition_to(State.THINKING)
         print("Thanatos: Thinking...", end="", flush=True)
         try:
-            response, sources = brain.respond(message)
+            response = brain.respond(message)
             state_manager.transition_to(State.IDLE)
         except Exception as e:  # noqa: BLE001
             state_manager.transition_to(State.ERROR)
@@ -223,12 +238,12 @@ def main() -> None:
             state_manager.transition_to(State.IDLE)
             continue
 
-        # Erase "Thanatos: Thinking..." before printing & speaking
+        # Erase "Thanatos: Thinking..." before printing
         print("\r" + " " * 30 + "\r", end="", flush=True)
-        print(f"Thanatos: {response}")
-        if sources:
-            print(f"\n{sources}")
-        tts.speak(response)
+        print(f"Thanatos: {response.display_text}")
+        if response.sources:
+            print(f"\n{response.sources}")
+        speak(response.speech_text)
 
 if __name__ == "__main__": 
     main()
