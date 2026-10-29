@@ -155,8 +155,14 @@ flowchart TD
 
 ---
 
-### Stage 3: Headless Web Search & Knowledge Hierarchy
+### Stage 3: Headless Web Search & Knowledge Hierarchy (Status: ✅ COMPLETED)
 - **Goal**: Answer real-time inquiries (*"Latest version of PyTorch"*, *"Best dosa in Kolkata"*) without launching a browser.
+- **Implemented & Verified**:
+  - `config.json`: Decoupled user location (`"Kolkata, India"`) and search parameters.
+  - `src/engine/web/search.py`: Clean `WebSearchEngine` using modern `ddgs`, automatic *"near me"* location injection, and context/citation formatting.
+  - `src/engine/brain/knowledge_router.py`: 4-tier routing (`LOCAL_KNOWLEDGE`, `WEB_SEARCH`, `HYBRID`, `CHAT`) with 0ms keyword fast-path and LLM fallback.
+  - `src/engine/brain/brain.py`: Connected live web context into Ollama synthesis and dual-track `Response` with clickable citations.
+  - `tests/test_web_search_integration.py`: End-to-end unit and integration test suite verified.
 - **Architecture**:
   1. Expand `KnowledgeRouter` into a clean 4-tier hierarchy:
      ```text
@@ -167,27 +173,37 @@ flowchart TD
      └── CHAT            (Direct conversational LLM)
      ```
   2. Implement `src/engine/web/search.py`:
-     - Uses `duckduckgo-search` to fetch top 3–5 search cards in ~400ms.
+     - Uses `ddgs` to fetch top 3–5 search cards in ~400ms.
   3. Location Configuration:
      - Keep location decoupled from Brain infrastructure.
      - Read default from `config.json`: `{"location": "Kolkata, India"}` (customizable by user).
 
 ---
 
-### Stage 4: Floating HUD & System Tray UI
-- **Goal**: An unobtrusive, modern desktop companion that stays out of your way while you code.
-- **Form Factor**:
-  1. **System Tray Integration**: Thanatos lives in the Windows taskbar tray (`^`) and runs silently in the background.
-  2. **Floating Pill / HUD Widget**:
-     - Visual state indicator (`Idle`, `Listening`, `Thinking`, `Searching Web`, `Executing`).
-     - Animated audio waveform when Thanatos speaks.
-     - RAG Inspector: Displays retrieved chunks, sources, and confidence score during development.
-     - Drag-and-drop PDF dropzone for instant document indexing.
-  3. **Stack**: FastAPI WebSocket backend (`localhost:8765`) + React/Vite + Tauri (lightweight native Windows executable).
+### Stage 4: Floating HUD & System Tray UI (Status: ✅ COMPLETED)
+- **Goal**: An unobtrusive, ultra-lightweight desktop companion that stays out of your way while you code.
+- **Implemented & Verified**:
+  - `src/engine/core/state.py`: Event bus with `subscribe()` callback mechanism and `State.SPEAKING`.
+  - `src/engine/core/hotkey.py`: Global system-wide `HotkeyManager` using `pynput` (`<ctrl>+<space>`) with 400ms debounce and `config.json` support.
+  - `src/engine/ui/tray.py`: Native Windows System Tray (`pystray`) with in-memory anti-aliased icon, status menu, mute toggle, and `ctypes` terminal show/hide.
+  - `src/engine/ui/hud.py`: Borderless, floating translucent pill widget with draggable canvas, pulsing state indicators, and glassmorphism styling (~15MB RAM).
+  - `src/engine/__main__.py`: Connected StateManager, HotkeyManager, SystemTrayApp, and FloatingHUD.
+  - Test suites (`tests/test_state_events.py`, `tests/test_hotkey.py`, `tests/test_hud.py`, `tests/test_tray.py`) all passing 100%.
 
 ---
 
-### Stage 5: Desktop Typing & Safe Writing Automation
+### Stage 4.5: Advanced Floating HUD & Hands-Free Interaction (Status: ✅ COMPLETED)
+- **Goal**: Complete desktop and voice autonomy without needing the terminal window or holding a spacebar.
+- **Implemented & Verified**:
+  - `src/engine/ui/hud.py`: Expandable Floating Mini-Deck widget (42px pill $\leftrightarrow$ 340px card) with symbol controls (`🔊/🔇`, `🎙️`, `📁`, `⤢/⤡`), scrollable chat log, prompt entry box, and state-reactive Tokyo Night glowing themes (`#7aa2f7`, `#7dcfff`, `#2ac3de`, `#e0af68`, `#9ece6a`).
+  - `src/engine/audio/audio.py`: Hands-Free Voice Activity Detection (`record_vad`) with dynamic ambient noise calibration, 250ms circular pre-roll buffer (prevents clipped starting consonants), 800ms pause cutoff, procedural sci-fi wake/sleep chimes, and conversational sleep phrase parser (`is_sleep_command`).
+  - `src/engine/audio/clap.py`: Ultra-lightweight acoustic transient `ClapDetector` with crest-factor impulse filtering and double-clap temporal gating ($0.12s \le \Delta t \le 0.75s$) for hands-free acoustic wake-up (`👏 👏`).
+  - `src/engine/__main__.py`: Unified non-blocking reactive event loop seamlessly orchestrating terminal stdin, HUD GUI, acoustic claps, hands-free VAD, and conversational sleep.
+  - Comprehensive unit test suites (`tests/test_clap.py`, `tests/test_audio_vad.py`, `tests/test_hud.py`, `tests/test_state_events.py`) passing 100%.
+
+---
+
+### Stage 5: Desktop Typing & Safe Writing Automation (CURRENT TARGET)
 - **Goal**: Dictate emails, essays, or notes directly into your active window with safety confirmations.
 - **Workflow**:
   1. User says: *"Thanatos, write an email asking for an extension on the project."*

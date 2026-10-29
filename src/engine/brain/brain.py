@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 import ollama
 
@@ -11,6 +12,7 @@ try:
     from engine.brain.query_condenser import QueryCondenser
     from engine.core.response import Response
     from engine.rag.rag_manager import RAGManager
+    from engine.web.search import WebSearchEngine
 except (ImportError, ValueError):
     # pyrefly: ignore [missing-import]
     from src.engine.brain.knowledge_router import KnowledgeRouter
@@ -24,6 +26,9 @@ except (ImportError, ValueError):
     # pyrefly: ignore [missing-import]
     from src.engine.rag.rag_manager import RAGManager
 
+    # pyrefly: ignore [missing-import]
+    from src.engine.web.search import WebSearchEngine
+
 
 class Brain: #created a blueprint or template for out brain of AI 
     def __init__(self):
@@ -35,6 +40,7 @@ class Brain: #created a blueprint or template for out brain of AI
             self._rag_manager = None
         self._router = KnowledgeRouter()
         self._condenser = QueryCondenser()
+        self._web_search = WebSearchEngine()
         self.last_sources: str | None = None
         self._system_prompt = """
 You are Thanatos, a local AI assistant.
@@ -93,7 +99,48 @@ When the user needs a serious answer, drop the humor and be serious.
                 logger.warning("Document retrieval failed (%s). Gracefully degrading to direct LLM chat.", e)
                 # If retrieval fails unexpectedly, gracefully fall back to general chat below
 
-        # 2. CONVERSATIONAL -> Direct LLM chat
+        # 2. WEB_SEARCH -> Live internet search via Headless DuckDuckGo
+        if route == "WEB_SEARCH":
+            try:
+                cards = self._web_search.search(message)
+                if cards:
+                    context_block, web_sources = self._web_search.format_context(cards)
+                    web_system_prompt = f"""You are Thanatos, a desktop AI assistant.
+Answer the user's question accurately using the live web search results below.
+Be concise, direct, and structured. Include relevant details and specifics.
+
+Live Web Results:
+{context_block}"""
+                    web_messages = [
+                        {"role": "system", "content": web_system_prompt},
+                        *self._conversation,
+                    ]
+                    response = ollama.chat(
+                        model="qwen2.5-coder:7b",
+                        messages=web_messages,
+                    )
+                    raw_content = (
+                        response.message.content
+                        if hasattr(response, "message")
+                        else response["message"]["content"]
+                    )
+                    ai_respond = str(raw_content or "")
+                    self._conversation.append({
+                        "role": "assistant",
+                        "content": ai_respond,
+                    })
+                    self.last_sources = web_sources
+                    speech_text = self._create_spoken_summary(ai_respond)
+                    return Response(
+                        display_text=ai_respond,
+                        speech_text=speech_text,
+                        sources=web_sources,
+                        metadata={"route": "WEB_SEARCH"},
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Web search execution failed (%s). Gracefully degrading to direct LLM chat.", e)
+
+        # 3. CONVERSATIONAL -> Direct LLM chat
         self.last_sources = None
         messages = [
             {"role": "system", "content": self._system_prompt},
@@ -150,6 +197,63 @@ When the user needs a serious answer, drop the humor and be serious.
 #         ↓
 #      Executor
     def get_intent(self, message: str) -> dict:
+        if not message:
+            return {"action": "chat", "target": None, "folder": None}
+
+        clean = message.lower().strip().rstrip("?!.")
+
+        # 0ms Fast-Path 1: Screen queries
+        screen_phrases = (
+            "screenshot", "take screenshot", "capture screen", "look at screen",
+            "analyze screen", "what is on my screen", "look at my screen", "view screen"
+        )
+        if any(p in clean for p in screen_phrases):
+            return {"action": "take_screenshot", "target": None, "folder": None}
+
+        # 0ms Fast-Path 2: Open application or document
+        open_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:open|launch|start|run)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+browser|\s+app|\s+application)?$",
+            clean,
+        )
+        if open_match:
+            target = open_match.group(1).strip()
+            if not target.endswith((".pdf", ".txt", ".docx", ".md", ".json", ".py", ".csv", ".xlsx")):
+                return {"action": "open_application", "target": target, "folder": None}
+            return {"action": "open_file", "target": target, "folder": None}
+
+        # 0ms Fast-Path 3: Close application
+        close_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:close|quit|exit|kill)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+browser|\s+app|\s+application)?$",
+            clean,
+        )
+        if close_match:
+            target = close_match.group(1).strip()
+            return {"action": "close_application", "target": target, "folder": None}
+
+        # 0ms Fast-Path 4: Play music / Spotify
+        if clean.startswith(("play ", "can you play ", "could you play ", "please play ")):
+            song = re.sub(r"^(?:can you\s+|could you\s+|please\s+)?play\s+", "", clean)
+            song = re.sub(r"\s+on\s+spotify.*$", "", song).strip()
+            return {"action": "play_music", "target": song, "folder": None}
+
+        # 0ms Fast-Path 5: Index document
+        index_match = re.match(r"^(?:index|add|ingest)\s+(?:document\s+|file\s+)?(.+)$", clean)
+        if index_match:
+            target = index_match.group(1).strip()
+            return {"action": "index_document", "target": target, "folder": None}
+
+        # 0ms Fast-Path 6: Conversational questions / chit-chat
+        chat_starts = (
+            "hi", "hello", "hey", "who", "what", "where", "when", "why", "how",
+            "can you", "could you", "tell me", "explain", "write", "generate",
+            "show me", "give me", "is it", "are you", "do you", "help", "good morning",
+            "good evening", "good afternoon"
+        )
+        if any(clean.startswith(cs) for cs in chat_starts) and not any(
+            k in clean for k in ("open ", "launch ", "start ", "close ", "quit ", "delete ", "shutdown", "restart")
+        ):
+            return {"action": "chat", "target": None, "folder": None}
+
         system_prompt = r"""You are Thanatos an intent classifier for a desktop AI assistant.
 Analyze the user's message and determine what they want to do.
 
@@ -218,14 +322,10 @@ Return ONLY a JSON object:"""
             return f"Error asking document: {e}", ""
     
     def _create_spoken_summary(self, text: str) -> str:
-        import re
-
         if not text:
             return ""
 
         clean = re.sub(r"\[Source\s*\d+[^\]]*\]", "", text).strip()
-        has_code = "```" in clean
-
         clean_no_code = re.sub(r"```[\s\S]*?```", "", clean).strip()
         lines = [line.strip() for line in clean_no_code.splitlines() if line.strip()]
         
@@ -234,19 +334,21 @@ Return ONLY a JSON object:"""
             if not line.startswith(("#", "```", "---", "==="))
         ]
         if not filtered_lines:
-            return "I've displayed the code on your screen."
+            return "Here is the requested code."
         joined_text = " ".join(filtered_lines)
         sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", joined_text) if s.strip()]
         if not sentences:
-            return "I've displayed the details on your screen."
-        # If it's already short and has no code, keep it untouched
-        if len(sentences) <= 2 and len(joined_text) <= 180 and not has_code:
             return joined_text
-        # Otherwise extract the first 1-2 punchy sentences
+
+        # If it's already concise (1-2 sentences), speak it cleanly
+        if len(sentences) <= 2 and len(joined_text) <= 220:
+            return joined_text
+
+        # Otherwise extract the punchy lead sentences directly
         summary = " ".join(sentences[:2])
         if len(summary) > 220:
             summary = sentences[0]
-        return f"{summary} I've displayed the full details on your screen."
+        return summary
         
         
 

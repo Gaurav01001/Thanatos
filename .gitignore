@@ -1,16 +1,101 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# Thanatos Project .gitignore
+# ==============================================================================
+
+# --- Python Bytecode & Compilation Cache ---
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
+
+# --- Linters, Type Checkers & Test Caches ---
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+cover/
+
+# --- Virtual Environments ---
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Large AI Models, Weights & Checkpoints (>50MB) ---
+*.onnx
+*.onnx.json
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.gguf
+models/
+
+# --- Generated Vector DB, Search Indices & Pickles ---
+*.pkl
+*.pickle
+bm25_index.pkl
+qdrant_data/
+benchmark_data/
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Generated Media, Audio & Screenshots ---
+screenshots/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+output.wav
+test.mp3
+
+# --- Logs & Runtime Output ---
+*.log
+logs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Secrets, API Keys & Local Config Overrides ---
+.env
+.env.*
+*.token
+HF_TOKEN
+credentials.json
+config.local.json
+
+# --- IDEs & Operating System Artifacts ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Packaging & Distribution ---
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -25,65 +110,14 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-# PyInstaller
 *.manifest
 *.spec
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDE & editors
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Generated screenshots and audio
-screenshots/
-*.png
-*.wav
-output.wav
-
-# Local Vector Database & Benchmark Data
-qdrant_data/
-benchmark_data/
-
-# Local tests and development scripts
+# --- Local Tests, Benchmarks & Scratch Scripts ---
 tests/
 test_*.py
+benchmark_real.py
 evaluate_rag.py
 populate_qdrant.py
-benchmark_real.py
-
-# Architecture and implementation plans
+scratch/
 *RAG_IMPLEMENTATION_PLAN.md
-
- 

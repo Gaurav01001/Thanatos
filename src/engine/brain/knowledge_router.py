@@ -21,6 +21,12 @@ class KnowledgeRouter:
         "explain", "critique", "and what"
     }
 
+    WEB_KEYWORDS: ClassVar[set[str]] = {
+        "near me", "nearby", "latest", "recent news", "today", "tomorrow",
+        "weather", "score", "price of", "release date", "current version",
+        "best restaurants", "search the web", "search for", "look up on web"
+    }
+
     def __init__(self, model: str = "qwen2.5-coder:7b"):
         self.model = model
 
@@ -32,12 +38,14 @@ class KnowledgeRouter:
     ) -> str:
         """
         Determines the knowledge path for the given query.
-        Returns: 'CONVERSATIONAL' | 'DOCUMENT_RETRIEVAL' | 'HYBRID'
+        Returns: 'CONVERSATIONAL' | 'DOCUMENT_RETRIEVAL' | 'HYBRID' | 'WEB_SEARCH'
         """
         clean_query = query.strip().lower()
 
-        # Fast-Path 1: If no documents are indexed, default to CONVERSATIONAL
+        # Fast-Path 1: If no documents are indexed, default to CONVERSATIONAL (unless web search keyword)
         if indexed_documents is not None and len(indexed_documents) == 0:
+            if any(kw in clean_query for kw in self.WEB_KEYWORDS):
+                return "WEB_SEARCH"
             return "CONVERSATIONAL"
 
         # Fast-Path 2: Check for explicit document keywords
@@ -61,6 +69,10 @@ class KnowledgeRouter:
         if clean_query in {"hi", "hello", "hey", "status", "who are you", "what can you do"}:
             return "CONVERSATIONAL"
 
+        # Fast-Path 4: Real-time, local places, and web search keywords
+        if any(kw in clean_query for kw in self.WEB_KEYWORDS):
+            return "WEB_SEARCH"
+
         # LLM Classification for ambiguous queries
         return self._classify_with_llm(query, indexed_documents, conversation_history)
 
@@ -83,11 +95,12 @@ Important Rule:
 If the user's latest query is a follow-up question (using pronouns like 'he', 'she', 'it', 'they', 'this', or asking for details) about a person, topic, or file discussed from indexed documents in recent turns, classify it as "DOCUMENT_RETRIEVAL".
 
 Categories:
-1. "CONVERSATIONAL": General chit-chat, programming help, general knowledge not tied to user's documents.
-2. "DOCUMENT_RETRIEVAL": Asking for specific information, data, summaries, or facts from user's indexed documents, OR follow-up questions about entities/topics discussed from the documents.
-3. "HYBRID": Needs both general conceptual reasoning/theory AND specific document facts or comparison.
+1. "CONVERSATIONAL": General chit-chat, programming help, evergreen general knowledge.
+2. "DOCUMENT_RETRIEVAL": Asking for facts from user's indexed documents or notes.
+3. "HYBRID": Needs both general reasoning AND specific document facts or comparison.
+4. "WEB_SEARCH": Real-time information, latest versions, current news/events, weather, local places near me.
 
-Return ONLY a JSON object: {{"route": "CONVERSATIONAL" | "DOCUMENT_RETRIEVAL" | "HYBRID"}}"""
+Return ONLY a JSON object: {{"route": "CONVERSATIONAL" | "DOCUMENT_RETRIEVAL" | "HYBRID" | "WEB_SEARCH"}}"""
 
         messages = [{"role": "system", "content": system_prompt}]
         if conversation_history:
@@ -115,7 +128,7 @@ Return ONLY a JSON object: {{"route": "CONVERSATIONAL" | "DOCUMENT_RETRIEVAL" | 
             result = json.loads(raw or "{}")
             route = result.get("route", "").upper()
 
-            if route in ("CONVERSATIONAL", "DOCUMENT_RETRIEVAL", "HYBRID"):
+            if route in ("CONVERSATIONAL", "DOCUMENT_RETRIEVAL", "HYBRID", "WEB_SEARCH"):
                 return route
             return "CONVERSATIONAL"
         except Exception:  # noqa: BLE001
@@ -132,6 +145,8 @@ if __name__ == "__main__":
         ("Summarize chapter 2 of the document", "DOCUMENT_RETRIEVAL"),
         ("What is machine learning and what does the PDF say about it?", "HYBRID"),
         ("Compare backpropagation with the author's method in the PDF", "HYBRID"),
+        ("What are the best cafes near me?", "WEB_SEARCH"),
+        ("What is the latest version of PyTorch?", "WEB_SEARCH"),
     ]
 
     print("--- TESTING KNOWLEDGE ROUTER ---")

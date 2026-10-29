@@ -1,0 +1,8 @@
+{
+  "location": "Kolkata, India",
+  "hotkey": "<ctrl>+<space>",
+  "web_search": {
+    "max_results": 4,
+    "timeout_seconds": 3.0
+  }
+}
