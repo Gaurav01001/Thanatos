@@ -25,7 +25,7 @@ class StateManager:
         State.LISTENING: {State.TRANSCRIBING, State.IDLE, State.ERROR},
         State.TRANSCRIBING: {State.THINKING, State.EXECUTING, State.IDLE, State.ERROR},
         State.THINKING: {State.EXECUTING, State.SPEAKING, State.IDLE, State.ERROR},
-        State.EXECUTING: {State.SPEAKING, State.IDLE, State.LISTENING, State.ERROR},
+        State.EXECUTING: {State.THINKING, State.SPEAKING, State.IDLE, State.LISTENING, State.ERROR},
         State.SPEAKING: {State.IDLE, State.LISTENING, State.ERROR},
         State.ERROR: {State.IDLE},
     }

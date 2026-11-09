@@ -1,5 +1,10 @@
 import ollama
 
+try:
+    from engine.core.ollama_service import safe_ollama_call
+except (ImportError, ValueError):
+    from src.engine.core.ollama_service import safe_ollama_call
+
 
 class RAGGenerator:
 
@@ -47,7 +52,8 @@ Answer:"""
 
     def generate(self, prompt):
         try:
-            response = ollama.chat(
+            response = safe_ollama_call(
+                ollama.chat,
                 model="qwen2.5-coder:7b",
                 messages=[
                     {

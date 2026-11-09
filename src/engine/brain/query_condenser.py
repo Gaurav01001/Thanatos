@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import ollama
 
+try:
+    from engine.core.ollama_service import safe_ollama_call
+except (ImportError, ValueError):
+    from src.engine.core.ollama_service import safe_ollama_call
+
 
 class QueryCondenser:
     def __init__(self, model: str = "qwen2.5-coder:7b"):
@@ -47,7 +52,8 @@ Rules:
 Follow-up question: {follow_up_query}
 Standalone search query:"""
         try:
-            response = ollama.chat(
+            response = safe_ollama_call(
+                ollama.chat,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},

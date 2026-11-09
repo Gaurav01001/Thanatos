@@ -49,6 +49,110 @@ def is_sleep_command(text: str) -> bool:
     return any(p in cleaned for p in phrases)
 
 
+def is_wake_command(text: str) -> bool:
+    """
+    Determines whether a spoken or typed message is a wake-up directive
+    (e.g. "wake up", "wake up thanatos", "hey thanatos", "are you there", "start listening").
+    """
+    if not text:
+        return False
+
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+
+    exact_matches = {
+        "wake", "wake up", "wakeup", "wake up thanatos", "wakeup thanatos",
+        "hey thanatos", "hi thanatos", "thanatos", "start listening",
+        "listen", "are you awake", "are you there", "wake up jarvis",
+        "jarvis", "hello thanatos", "thanatos wake up"
+    }
+    if cleaned in exact_matches:
+        return True
+
+    wake_phrases = [
+        "wake up",
+        "wakeup",
+        "hey thanatos",
+        "hi thanatos",
+        "wake up thanatos",
+        "start listening",
+        "are you awake",
+        "are you there",
+        "thanatos wake up",
+    ]
+    for phrase in wake_phrases:
+        if phrase in cleaned:
+            return True
+
+    match = re.match(
+        r"^(?:please\s+|can you\s+|could you\s+)?(?:wake\s*up|wake|listen|start\s*listening)\s+(?:thanatos|assistant|jarvis)?$",
+        cleaned,
+    )
+    return bool(match)
+
+
+def is_exit_command(text: str) -> bool:
+    """
+    Determines whether a spoken or typed message is an exit/close/shutdown directive
+    for the AI assistant (e.g. "exit", "quit", "close assistant", "shut down thanatos").
+    """
+    if not text:
+        return False
+
+    cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+
+    exact_matches = {
+        "exit", "quit", "bye", "goodbye", "terminate", "close",
+        "shutdown", "stop", "poweroff"
+    }
+    if cleaned in exact_matches:
+        return True
+
+    exit_phrases = [
+        "close assistant",
+        "close the assistant",
+        "close the ai assistant",
+        "close ai assistant",
+        "close thanatos",
+        "exit assistant",
+        "exit the assistant",
+        "exit thanatos",
+        "quit assistant",
+        "quit thanatos",
+        "shut down assistant",
+        "shutdown assistant",
+        "shut down the assistant",
+        "shutdown the assistant",
+        "shut down thanatos",
+        "shutdown thanatos",
+        "turn off assistant",
+        "turn off the assistant",
+        "turn off thanatos",
+        "terminate assistant",
+        "terminate the assistant",
+        "terminate session",
+        "terminate thanatos",
+        "stop assistant",
+        "kill assistant",
+        "kill thanatos",
+        "goodbye thanatos",
+        "bye thanatos",
+        "close the application",
+        "close application",
+        "close program",
+        "exit program",
+        "quit program",
+    ]
+    for phrase in exit_phrases:
+        if phrase in cleaned:
+            return True
+
+    match = re.match(
+        r"^(?:please\s+|can you\s+|could you\s+)?(?:exit|quit|close|shut\s*down|terminate|turn\s*off)\s+(?:the\s+)?(?:ai\s+)?(?:assistant|thanatos|app|program|session)$",
+        cleaned,
+    )
+    return bool(match)
+
+
 def play_chime(kind: str = "wake", samplerate: int = 24000) -> None:
     """
     Plays a brief, non-intrusive synthesized audio cue:

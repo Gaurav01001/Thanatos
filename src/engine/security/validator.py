@@ -66,8 +66,11 @@ class SecurityValidator:
         "analyze_image",
         "analyze_screen",
         "look_at_screen",
+        "dsa_mentor",
         "index_document",
         "ask_document",
+        "write_text",
+        "paste_text",
     }
 
     # Actions that should require user confirmation.
@@ -77,6 +80,8 @@ class SecurityValidator:
         "shutdown",
         "restart",
         "close_application",
+        "send_email",
+        "send_message",
     }
 
     def _contains_dangerous_characters(self, value: str) -> Optional[str]:
@@ -258,8 +263,8 @@ class SecurityValidator:
 
         action = action.strip().lower()
 
-        # Screenshot action is always safe and needs no target.
-        if action in ("take_screenshot", "analyze_image", "analyze_screen", "look_at_screen"):
+        # Screenshot and vision actions are always safe and need no target.
+        if action in ("take_screenshot", "analyze_image", "analyze_screen", "look_at_screen", "dsa_mentor"):
             return "SAFE", None
  
         # Unknown actions fail closed.
@@ -325,6 +330,10 @@ class SecurityValidator:
 
         # Document question asking validation.
         if action == "ask_document":
+            return "SAFE", None
+
+        # Desktop typing and writing automation.
+        if action in ("write_text", "paste_text"):
             return "SAFE", None
 
         # Fail closed.

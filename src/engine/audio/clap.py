@@ -27,10 +27,10 @@ class ClapDetector:
     def __init__(
         self,
         on_double_clap: Callable[[], None],
-        threshold: float = 0.25,
-        crest_factor_threshold: float = 3.6,
-        min_gap: float = 0.12,
-        max_gap: float = 0.75,
+        threshold: float = 0.15,
+        crest_factor_threshold: float = 2.8,
+        min_gap: float = 0.10,
+        max_gap: float = 0.85,
         samplerate: int = 16000,
         block_size: int = 512,
     ) -> None:
@@ -88,6 +88,7 @@ class ClapDetector:
                 self._last_clap_time = 0.0
                 return True
             # First clap or too slow: start tracking from this peak
+            logger.debug("First clap registered (peak: %.3f, crest: %.2f) at %.3fs", peak, crest, now)
             self._last_clap_time = now
 
         # Invalidate old single claps that exceeded the max gap
@@ -132,6 +133,8 @@ class ClapDetector:
     def resume(self) -> None:
         """Resumes clap detection after audio playback or recording finishes."""
         with self._lock:
+            if not self._is_paused:
+                return
             self._last_clap_time = 0.0
             self._cooldown_until = time.time() + 0.3
             self._is_paused = False

@@ -1,5 +1,10 @@
 import ollama
 
+try:
+    from engine.core.ollama_service import safe_ollama_call
+except (ImportError, ValueError):
+    from src.engine.core.ollama_service import safe_ollama_call
+
 
 class VisionModel:
     """Uses a local Ollama vision model to analyze images."""
@@ -12,7 +17,8 @@ class VisionModel:
         Send an image to the vision model and return its description.
         """
 
-        response = ollama.chat(
+        response = safe_ollama_call(
+            ollama.chat,
             model=self.model,
             messages=[
                 {

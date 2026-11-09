@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 try:
     from engine.brain.knowledge_router import KnowledgeRouter
     from engine.brain.query_condenser import QueryCondenser
+    from engine.core.ollama_service import ensure_ollama_running, safe_ollama_call
     from engine.core.response import Response
     from engine.rag.rag_manager import RAGManager
     from engine.web.search import WebSearchEngine
@@ -19,6 +20,9 @@ except (ImportError, ValueError):
 
     # pyrefly: ignore [missing-import]
     from src.engine.brain.query_condenser import QueryCondenser
+
+    # pyrefly: ignore [missing-import]
+    from src.engine.core.ollama_service import ensure_ollama_running, safe_ollama_call
 
     # pyrefly: ignore [missing-import]
     from src.engine.core.response import Response
@@ -115,7 +119,8 @@ Live Web Results:
                         {"role": "system", "content": web_system_prompt},
                         *self._conversation,
                     ]
-                    response = ollama.chat(
+                    response = safe_ollama_call(
+                        ollama.chat,
                         model="qwen2.5-coder:7b",
                         messages=web_messages,
                     )
@@ -147,7 +152,8 @@ Live Web Results:
             *self._conversation
         ]
         try:
-            response = ollama.chat(
+            response = safe_ollama_call(
+                ollama.chat,
                 model="qwen2.5-coder:7b",
                 messages=messages,
             )
@@ -171,7 +177,11 @@ Live Web Results:
         except Exception as e:  # noqa: BLE001
             if self._conversation and self._conversation[-1]["role"] == "user":
                 self._conversation.pop()
-            err_msg = f"Error , Something went wrong : {e}"
+            err_str = str(e)
+            if "failed to connect" in err_str.lower() or "connection" in err_str.lower():
+                err_msg = "Error: Failed to connect to Ollama. Thanatos attempted to start Ollama automatically, but could not connect. Please check that Ollama is installed and running."
+            else:
+                err_msg = f"Error , Something went wrong : {e}"
             return Response(
                 display_text=err_msg,
                 speech_text="Sorry, something went wrong while processing your request.",
@@ -210,6 +220,34 @@ Live Web Results:
         if any(p in clean for p in screen_phrases):
             return {"action": "take_screenshot", "target": None, "folder": None}
 
+        # 0ms Fast-Path 1.5: Algorithmic DSA Mentor queries
+        hint_phrases = (
+            "give me a hint", "hint on this", "algorithmic hint", "need a hint",
+            "give a hint", "hint for this problem", "nudge me", "give me an intuition",
+            "leetcode hint", "help me with this problem", "help me solve this problem"
+        )
+        debug_phrases = (
+            "why does this test fail", "why is this test case failing", "why does test fail",
+            "debug my code", "debug this test", "find the bug", "why did this fail"
+        )
+        complexity_phrases = (
+            "what is the time complexity", "what's the time complexity",
+            "what is the space complexity", "what's the complexity", "complexity of my code"
+        )
+        solution_phrases = (
+            "show me the optimal solution", "give me the full solution",
+            "show the optimal code", "show me the solution"
+        )
+
+        if any(p in clean for p in hint_phrases):
+            return {"action": "dsa_mentor", "target": message, "folder": "hint"}
+        if any(p in clean for p in debug_phrases):
+            return {"action": "dsa_mentor", "target": message, "folder": "debug"}
+        if any(p in clean for p in complexity_phrases):
+            return {"action": "dsa_mentor", "target": message, "folder": "complexity"}
+        if any(p in clean for p in solution_phrases):
+            return {"action": "dsa_mentor", "target": message, "folder": "solution"}
+
         # 0ms Fast-Path 2: Open application or document
         open_match = re.match(
             r"^(?:can you\s+|could you\s+|please\s+)?(?:open|launch|start|run)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+browser|\s+app|\s+application)?$",
@@ -242,15 +280,35 @@ Live Web Results:
             target = index_match.group(1).strip()
             return {"action": "index_document", "target": target, "folder": None}
 
-        # 0ms Fast-Path 6: Conversational questions / chit-chat
+        # 0ms Fast-Path 6: Desktop Typing & Safe Writing Automation
+        write_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:type|write|draft|compose)\s+(?:an?\s+)?(.+)$",
+            clean,
+        )
+        if write_match:
+            target = write_match.group(1).strip()
+            return {"action": "write_text", "target": target, "folder": None}
+
+        paste_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?paste\s+(?:text\s+|this:\s*|this\s+)?(.+)$",
+            clean,
+        )
+        if paste_match:
+            target = paste_match.group(1).strip()
+            return {"action": "paste_text", "target": target, "folder": None}
+
+        # 0ms Fast-Path 7: Conversational questions / chit-chat
         chat_starts = (
             "hi", "hello", "hey", "who", "what", "where", "when", "why", "how",
-            "can you", "could you", "tell me", "explain", "write", "generate",
+            "can you", "could you", "tell me", "explain", "generate",
             "show me", "give me", "is it", "are you", "do you", "help", "good morning",
             "good evening", "good afternoon"
         )
         if any(clean.startswith(cs) for cs in chat_starts) and not any(
-            k in clean for k in ("open ", "launch ", "start ", "close ", "quit ", "delete ", "shutdown", "restart")
+            k in clean for k in (
+                "open ", "launch ", "start ", "close ", "quit ", "delete ",
+                "shutdown", "restart", "type ", "write ", "draft ", "compose ", "paste "
+            )
         ):
             return {"action": "chat", "target": None, "folder": None}
 
@@ -280,12 +338,18 @@ Allowed actions:
 - "restart": When user asks to restart or reboot the PC. "target": null, "folder": null.
 - "play_music": When user asks to play a song, music, track, or artist on Spotify (e.g. "play Starboy", "play music by The Weeknd", "play Bohemian Rhapsody on Spotify"). Set "target" to the song or artist name. "folder": null.
 - "index_document": When the user asks to index, add, or ingest a document into Thanatos's knowledge base (e.g. "index D:\Documents\ml.pdf"). Set "target" to the full file path and "folder" to null.
+- "write_text": When user asks to type, write, compose, or draft text, letters, notes, or emails into their active window (e.g. "write an email asking for an extension", "type hello world", "draft a reply to John", "compose a formal apology"). Set "target" to the drafting instructions/topic. "folder": null.
+- "paste_text": When user asks to paste text into the active window (e.g. "paste hello world", "paste this"). Set "target" to the text to paste. "folder": null.
+- "send_email": When user asks to send or dispatch an email. Set "target" to recipient or topic. "folder": null.
+- "send_message": When user asks to send or post a message. Set "target" to recipient or topic. "folder": null.
+- "dsa_mentor": When user asks for a hint, debugging help, time complexity, or algorithmic guidance on code or a problem visible on their screen (e.g. "give me a hint", "why does test 3 fail", "check my code", "what's the time complexity"). Set "target" to the user query and "folder" to mode ("hint", "debug", "complexity", or "solution").
 - "chat": For all conversations, greetings, general questions, asking about document contents/authors/facts (e.g. "who prepared notes in aiml.pdf?", "what does the PDF say?"), or help. "target": null, "folder": null.
 
 Return ONLY a JSON object:"""
 
         try:
-            response = ollama.chat(
+            response = safe_ollama_call(
+                ollama.chat,
                 model="qwen2.5-coder:7b",
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -320,6 +384,47 @@ Return ONLY a JSON object:"""
             return str(answer), str(sources)
         except Exception as e:  # noqa: BLE001
             return f"Error asking document: {e}", ""
+
+    def draft_text(self, prompt: str) -> str:
+        """
+        Synthesizes raw content (email, letter, note, or dictated text)
+        to paste directly into the user's active window with zero conversational preamble.
+        """
+        if not prompt or not prompt.strip():
+            return ""
+
+        system_prompt = (
+            "You are a desktop writing assistant. "
+            "The user will give you a topic or prompt for text to be typed into their active document. "
+            "Write the requested content directly.\n\n"
+            "CRITICAL RULES:\n"
+            "1. Output ONLY the raw content to be pasted.\n"
+            "2. Do NOT output any conversational preamble or pleasantries (e.g. no 'Here is your draft:', 'Sure!').\n"
+            "3. Do NOT include markdown code fences (```) unless the user specifically asked for computer code.\n"
+            "4. Output clean, complete text ready to be typed."
+        )
+
+        try:
+            response = safe_ollama_call(
+                ollama.chat,
+                model="qwen2.5-coder:7b",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt.strip()},
+                ],
+            )
+            raw_content = (
+                response.message.content
+                if hasattr(response, "message")
+                else response["message"]["content"]
+            )
+            text = str(raw_content or "").strip()
+            if text.startswith('"""') and text.endswith('"""'):
+                text = text[3:-3].strip()
+            return text
+        except Exception as e:  # noqa: BLE001
+            logger.error("Failed to draft text via Ollama: %s", e)
+            return prompt.strip()
     
     def _create_spoken_summary(self, text: str) -> str:
         if not text:

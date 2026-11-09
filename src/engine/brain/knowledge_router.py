@@ -5,6 +5,11 @@ from typing import ClassVar
 
 import ollama
 
+try:
+    from engine.core.ollama_service import safe_ollama_call
+except (ImportError, ValueError):
+    from src.engine.core.ollama_service import safe_ollama_call
+
 
 class KnowledgeRouter:
     """Classifies user queries into CONVERSATIONAL, DOCUMENT_RETRIEVAL, or HYBRID."""
@@ -113,7 +118,8 @@ Return ONLY a JSON object: {{"route": "CONVERSATIONAL" | "DOCUMENT_RETRIEVAL" | 
         messages.append({"role": "user", "content": query})
 
         try:
-            response = ollama.chat(
+            response = safe_ollama_call(
+                ollama.chat,
                 model=self.model,
                 messages=messages,
                 format="json",

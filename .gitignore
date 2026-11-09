@@ -43,6 +43,8 @@ venv.bak/
 *.safetensors
 *.gguf
 models/
+.huggingface/
+huggingface/
 
 # --- Generated Vector DB, Search Indices & Pickles ---
 *.pkl
@@ -53,6 +55,7 @@ benchmark_data/
 *.sqlite
 *.sqlite3
 *.db
+*.lock
 
 # --- Generated Media, Audio & Screenshots ---
 screenshots/
@@ -60,6 +63,7 @@ screenshots/
 *.jpg
 *.jpeg
 *.gif
+!rag_flowchart.jpg
 *.wav
 *.mp3
 *.ogg
@@ -67,12 +71,17 @@ screenshots/
 *.m4a
 output.wav
 test.mp3
+temp_piper*.wav
+piper_cache/
 
 # --- Logs & Runtime Output ---
 *.log
 logs/
 pip-log.txt
 pip-delete-this-directory.txt
+*.tmp
+*.temp
+*.bak
 
 # --- Secrets, API Keys & Local Config Overrides ---
 .env
@@ -91,6 +100,8 @@ config.local.json
 .DS_Store
 Thumbs.db
 desktop.ini
+*.lnk
+$RECYCLE.BIN/
 
 # --- Packaging & Distribution ---
 build/
@@ -107,6 +118,7 @@ var/
 wheels/
 share/python-wheels/
 *.egg-info/
+src/*.egg-info/
 .installed.cfg
 *.egg
 MANIFEST

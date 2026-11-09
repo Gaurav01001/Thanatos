@@ -102,9 +102,9 @@ flowchart TD
     M2["Stage 2: Response Architecture & Modes 🎯<br>(Response Object, Dual-Track Speech, /mute)"]
     M3["Stage 3: Headless Web Search 🌐<br>(DuckDuckGo, Manual Settings Location, Web Hybrid)"]
     M4["Stage 4: Floating HUD & System Tray 🖥️<br>(Unobtrusive UI, Waveform, RAG Inspector)"]
-    M5["Stage 5: Desktop Typing & Safe Writing ✍️<br>(pynput + clipboard injection + confirmation)"]
-    M6["Stage 6: Vision Hotkey & LeetCode Companion 🧩<br>(Global Hotkey F8 + Socratic Hint Engine)"]
-    M7["Stage 7: Generic Browser Automation Agent 🌍<br>(Playwright Primitives: navigate, click, type)"]
+    M5["Stage 5: Desktop Typing & Safe Writing ✅<br>(pynput + clipboard injection + confirmation - DONE)"]
+    M6["Stage 6: Vision Hotkey & LeetCode Companion ✅<br>(Global Hotkey F8 + Socratic Hint Engine - DONE)"]
+    M7["Stage 7: Generic Browser Automation Agent 🎯<br>(Playwright Primitives: navigate, click, type)"]
     M8["Stage 8: 3-Tier Persistent Memory 🧠<br>(User Preferences + Conversation + Vector Qdrant)"]
     M9["Stage 9: Universal 1-Click Distribution 📦<br>(PowerShell install.ps1 installer)"]
 
@@ -198,13 +198,19 @@ flowchart TD
   - `src/engine/ui/hud.py`: Expandable Floating Mini-Deck widget (42px pill $\leftrightarrow$ 340px card) with symbol controls (`🔊/🔇`, `🎙️`, `📁`, `⤢/⤡`), scrollable chat log, prompt entry box, and state-reactive Tokyo Night glowing themes (`#7aa2f7`, `#7dcfff`, `#2ac3de`, `#e0af68`, `#9ece6a`).
   - `src/engine/audio/audio.py`: Hands-Free Voice Activity Detection (`record_vad`) with dynamic ambient noise calibration, 250ms circular pre-roll buffer (prevents clipped starting consonants), 800ms pause cutoff, procedural sci-fi wake/sleep chimes, and conversational sleep phrase parser (`is_sleep_command`).
   - `src/engine/audio/clap.py`: Ultra-lightweight acoustic transient `ClapDetector` with crest-factor impulse filtering and double-clap temporal gating ($0.12s \le \Delta t \le 0.75s$) for hands-free acoustic wake-up (`👏 👏`).
-  - `src/engine/__main__.py`: Unified non-blocking reactive event loop seamlessly orchestrating terminal stdin, HUD GUI, acoustic claps, hands-free VAD, and conversational sleep.
+  - `src/engine/__main__.py`: Unified non-blocking reactive event loop seamlessly orchestrating terminal stdin, HUD GUI, acoustic claps, hands-free VAD, conversational sleep commands, and full voice/text exit commands (`"exit"`, `"close assistant"`, `"terminate"`).
   - Comprehensive unit test suites (`tests/test_clap.py`, `tests/test_audio_vad.py`, `tests/test_hud.py`, `tests/test_state_events.py`) passing 100%.
 
 ---
 
-### Stage 5: Desktop Typing & Safe Writing Automation (CURRENT TARGET)
+### Stage 5: Desktop Typing & Safe Writing Automation (Status: ✅ COMPLETED)
 - **Goal**: Dictate emails, essays, or notes directly into your active window with safety confirmations.
+- **Implemented & Verified**:
+  - `src/engine/executor/executor.py`: Implemented `paste_text(text: str)` with Windows Unicode clipboard injection (`CF_UNICODETEXT`) and `pynput` key sequence (`Ctrl + V`).
+  - `src/engine/security/validator.py`: Registered `"write_text"` and `"paste_text"` under `SAFE_ACTIONS`; registered `"send_email"` and `"send_message"` under `CONFIRM_ACTIONS` with confirmation prompt previews.
+  - `src/engine/brain/brain.py`: Added 0ms fast-path intent matching for `write_text`, `paste_text`, LLM intent classification fallback, and added `draft_text(prompt: str)` with strict raw-text output formatting.
+  - `src/engine/__main__.py`: Connected end-to-end action dispatch with thinking state, live console/HUD draft preview, focused window injection, vocal confirmation, and interactive confirmation gate.
+  - `tests/test_stage5_typing.py`: Comprehensive test suite verifying security checks, intent mapping, mock clipboard injection, and Ollama drafting passing 100% green.
 - **Workflow**:
   1. User says: *"Thanatos, write an email asking for an extension on the project."*
   2. Intent maps to `action: "write_text"`.
@@ -214,8 +220,15 @@ flowchart TD
 
 ---
 
-### Stage 6: Vision Hotkey & LeetCode DSA Companion
+### Stage 6: Vision Hotkey & LeetCode DSA Companion (Status: ✅ COMPLETED)
 - **Goal**: Fullscreen screen-aware algorithmic mentor without Alt-Tabbing.
+- **Implemented & Verified**:
+  - `src/engine/vision/mentor.py`: Built `DSAMentor` and `MentorResponse` with Socratic prompt engineering across 4 modes (`hint`, `debug`, `complexity`, and `solution`), dual-track technical card formatting, and spoken punchline whisper.
+  - `src/engine/core/hotkey.py`: Upgraded `HotkeyManager` to support simultaneous global shortcuts with per-key debouncing (`<ctrl>+<space>` for HUD Mini-Deck, `<f8>` for Vision DSA Mentor) and configuration overrides in `config.json`.
+  - `src/engine/security/validator.py`: Registered `"dsa_mentor"` as an allowed `SAFE_ACTIONS` vision routine.
+  - `src/engine/brain/brain.py`: Added 0ms fast-path intent matching for algorithmic hints, test-case debugging, time/space complexity, and optimal solution queries with Qwen LLM schema fallback.
+  - `src/engine/__main__.py`: Connected end-to-end non-blocking execution via event queue (`vision_mentor`), silent screen grab (`ScreenCapture.capture`), live HUD card display, and Piper TTS headphone whisper.
+  - `tests/test_stage6_vision_mentor.py`: Full test suite covering prompt construction, output parsing, mock vision inference, security validation, intent routing, and multi-hotkey debouncing passing 100% green.
 - **Iterative Milestones**:
   - **Level 1**: Global hotkey (`F8` or `Ctrl + Alt + Space`) captures screen $\to$ *"What am I looking at?"*
   - **Level 2 (Socratic Hint)**: Identifies the LeetCode problem + user's code, pinpoints the bottleneck, and whispers a 1-sentence algorithmic nudge into headphones without giving away code.
