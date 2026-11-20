@@ -1,9 +1,13 @@
+from pynput import keyboard
+from sympy import false
 import os
 import difflib
 import urllib.parse
 import time
 import ctypes
 from pynput.keyboard import Controller, Key
+import win32clipboard 
+import win32con
 
 class Executor:
 
@@ -80,7 +84,26 @@ class Executor:
                                 os.startfile(full_path)
                                 return True
         return False
+    def paste_text(self , text: str) -> bool:
+        if not text:
+            return False
+        try:
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
 
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+            win32clipboard.CloseClipboard()
+            time.sleep(0.05)
+
+            keyboard = Controller()
+            keyboard.press(Key.ctrl)
+            keyboard.press('v')
+            keyboard.release('v')
+            keyboard.release(Key.ctrl)
+            return True
+        except Exception as e:
+            return False
+            
     def play_spotify(self, query: str) -> bool:
         """Opens Spotify, focuses the window, and triggers playback for the top result."""
         if not query:

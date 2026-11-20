@@ -5,6 +5,7 @@ import io
 import os
 import re
 import wave
+from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
@@ -35,8 +36,8 @@ def clean_text_for_speech(text: str) -> str:
     # 2. Strip inline code backticks (`code` -> code)
     text = re.sub(r"`([^`]+)`", r"\1", text)
 
-    # 3. Strip citation markers like [Source 1], [Source 1, 2], [Source 2-4]
-    text = re.sub(r"\[Source\s*[\d,\s-]+\]", "", text, flags=re.IGNORECASE)
+    # 3. Strip citation markers like [Source 1], [Web 1: ...], [Source 2-4]
+    text = re.sub(r"\[(?:Source|Web)\s*[^\]]*\]", "", text, flags=re.IGNORECASE)
 
     # 4. Remove Markdown headers (#, ##, ###)
     text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
@@ -46,16 +47,28 @@ def clean_text_for_speech(text: str) -> str:
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
     text = re.sub(r"__([^_]+)__", r"\1", text)
 
-    # 6. Replace URLs with simple word 'link'
-    text = re.sub(r"https?://\S+", "link", text)
+    # 6. Remove URLs completely (so TTS never spells out links)
+    text = re.sub(r"https?://\S+", "", text)
 
-    # 7. Clean bullet list markers (*, -, •)
+    # 7. Clean bullet list markers (*, -, •, 1., 2.)
     text = re.sub(r"^\s*[-*•]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
 
-    # 8. Collapse whitespace into clean single spaces
+    # 8. Convert currency and numbers for smooth vocal pronunciation
+    text = re.sub(r"₹\s*(\d+(?:,\d+)*)", r"\1 rupees", text)
+    text = re.sub(r"\$\s*(\d+(?:,\d+)*)", r"\1 dollars", text)
+    text = re.sub(r"~\s*", "about ", text)
+
+    # 9. Convert ratios like 1:1 into natural speech
+    text = re.sub(r"\b(\d+):(\d+)\b", r"\1 to \2", text)
+
+    # 10. Strip remaining stray asterisks, tildes, hashes
+    text = re.sub(r"[*_~`#]", "", text)
+
+    # 11. Collapse whitespace into clean single spaces
     text = re.sub(r"\s+", " ", text).strip()
 
-    # 9. Ensure ending punctuation for natural vocal cadence
+    # 12. Ensure ending punctuation for natural vocal cadence
     if text and not text.endswith((".", "!", "?")):
         text += "."
 
@@ -110,7 +123,7 @@ class TextToSpeech:
     def __init__(
         self,
         profile: str = "jarvis",
-        speed: float = 1.15,
+        speed: float = 1.0,
         edge_voice: str | None = None,
         rate: str | None = None,
         pitch: str | None = None,
@@ -133,18 +146,36 @@ class TextToSpeech:
         self._load_local_piper()
 
     def _load_local_piper(self) -> None:
-        """Loads offline Piper ONNX model as fallback."""
+        """Loads offline Piper ONNX model with ultra-low latency."""
         try:
-            model_path = "en_US-ryan-medium.onnx"
-            if os.path.exists(model_path):
-                self._piper_voice = PiperVoice.load(model_path)
+            project_root = Path(__file__).resolve().parents[3]
+            # Match voice model based on selected profile
+            preferred_model = "en_US-norman-medium.onnx" if self.profile in ("mentalist", "calm", "soothing") else "en_US-ryan-medium.onnx"
+            candidate_paths = [
+                project_root / preferred_model,
+                Path(preferred_model),
+                project_root / "en_US-ryan-medium.onnx",
+                Path("en_US-ryan-medium.onnx"),
+                project_root / "en_US-norman-medium.onnx",
+                Path("en_US-norman-medium.onnx"),
+            ]
+
+            found_path = None
+            for p in candidate_paths:
+                if p.exists():
+                    found_path = p
+                    break
+
+            if found_path:
+                self._piper_voice = PiperVoice.load(str(found_path))
+                logger.info("Local low-latency Piper voice loaded: %s", found_path.name)
             else:
-                logger.warning("Local Piper model %s not found.", model_path)
+                logger.warning("Local Piper model %s not found in project root.", preferred_model)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to initialize local Piper voice: %s", e)
 
     def speak(self, text: str) -> None:
-        """Main vocalization method with smart sanitization and graceful fallback."""
+        """Main vocalization method with zero-lag prioritization and graceful fallback."""
         if not text or not text.strip():
             return
 
@@ -152,22 +183,30 @@ class TextToSpeech:
         if not clean_text:
             return
 
-        # 1. Try ElevenLabs if API key is provided
-        if self.eleven_api_key:
+        # Engine selection: "piper" (default ultra-fast local voice < 100ms), "edge", or "elevenlabs"
+        engine = os.environ.get("THANATOS_TTS_ENGINE", "piper").lower().strip()
+
+        # 1. Fast Path: Local In-Memory Piper Voice (Zero network latency, starts speaking in < 100ms)
+        if engine in ("piper", "local", "auto") and self._piper_voice is not None:
+            if self._speak_piper(clean_text):
+                return
+
+        # 2. Try ElevenLabs if explicitly requested and API key is provided
+        if self.eleven_api_key and engine == "elevenlabs":
             try:
                 if self._speak_elevenlabs(clean_text):
                     return
             except Exception as e:  # noqa: BLE001
                 logger.warning("ElevenLabs TTS failed: %s. Falling back to Edge-TTS.", e)
 
-        # 2. Try High-Quality Neural Edge-TTS (Free, No API Key, Studio Quality)
+        # 3. Try High-Quality Neural Edge-TTS (if requested or Piper unavailable)
         try:
             if self._speak_edge_tts(clean_text):
                 return
         except Exception as e:  # noqa: BLE001
             logger.warning("Edge-TTS failed: %s. Falling back to offline Piper voice.", e)
 
-        # 3. Fallback to Offline Piper ONNX
+        # 4. Fallback to Offline Piper ONNX
         self._speak_piper(clean_text)
 
     def _speak_elevenlabs(self, text: str) -> bool:
@@ -220,33 +259,98 @@ class TextToSpeech:
             logger.warning("Edge-TTS synthesis error: %s", e)
             return False
 
-    def _speak_piper(self, text: str) -> None:
-        """Local offline fallback using Piper ONNX."""
-        if not self._piper_voice:
-            logger.error("No TTS engine available to speak.")
-            return
+    def _get_output_device_and_rate(self) -> tuple[int | None, float]:
+        """
+        Determines the optimal audio output device and sample rate.
+        Prefers Windows WASAPI for low-latency, zero-jitter, clean playback.
+        """
+        try:
+            apis = sd.query_hostapis()
+            wasapi_api_idx = next(
+                (i for i, api in enumerate(apis) if "WASAPI" in api.get("name", "")),
+                None,
+            )
+            if wasapi_api_idx is not None:
+                wasapi_devices = [
+                    (idx, d)
+                    for idx, d in enumerate(sd.query_devices())
+                    if d.get("hostapi") == wasapi_api_idx and d.get("max_output_channels", 0) > 0
+                ]
+                if wasapi_devices:
+                    # Prefer primary speaker device on WASAPI
+                    for idx, d in wasapi_devices:
+                        name = d.get("name", "")
+                        if "Speakers" in name or "Default" in name or "Headphones" in name:
+                            return idx, float(d.get("default_samplerate", 48000.0))
+                    return wasapi_devices[0][0], float(wasapi_devices[0][1].get("default_samplerate", 48000.0))
+        except Exception:  # noqa: BLE001
+            pass
 
         try:
-            temp_wav = "output.wav"
-            with wave.open(temp_wav, "wb") as wav_file:
-                self._piper_voice.synthesize_wav(text, wav_file, syn_config=self._piper_config)
+            default_out = sd.default.device[1] if isinstance(sd.default.device, (list, tuple)) else None
+            if default_out is not None and default_out >= 0:
+                def_dev = sd.query_devices(default_out)
+                return default_out, float(def_dev.get("default_samplerate", 44100.0))
+        except Exception:  # noqa: BLE001
+            pass
 
-            audio, sample_rate = sf.read(temp_wav)
-            padded_audio = np.pad(audio, (0, int(sample_rate * 0.3)))
+        return None, 44100.0
+
+    def _play_audio_array(self, audio: np.ndarray, sample_rate: int) -> None:
+        """Plays audio array with automatic sample rate matching and flush padding."""
+        dev_idx, target_rate = self._get_output_device_and_rate()
+        target_sr = int(target_rate)
+
+        # 1. High-Quality Anti-Aliased Resampling to match DAC hardware clock
+        if sample_rate != target_sr and len(audio) > 0:
+            try:
+                import scipy.signal
+                num_target_samples = int(len(audio) * target_sr / sample_rate)
+                audio = scipy.signal.resample(audio, num_target_samples)
+                sample_rate = target_sr
+            except Exception as e:
+                logger.debug("Resampling skipped: %s", e)
+
+        # 2. Generous 0.5s Trailing Silence Padding
+        # Ensures DAC and Windows audio engine flush the final word completely before closing
+        padded_audio = np.pad(audio, (0, int(sample_rate * 0.5)))
+
+        # 3. Play through low-latency stream
+        try:
+            if dev_idx is not None:
+                sd.play(padded_audio, sample_rate, device=dev_idx)
+            else:
+                sd.play(padded_audio, sample_rate)
+            sd.wait()
+        except Exception as e:
+            logger.warning("Preferred audio device failed (%s), falling back to default.", e)
             sd.play(padded_audio, sample_rate)
             sd.wait()
+
+    def _speak_piper(self, text: str) -> bool:
+        """Local offline zero-latency voice synthesis via in-memory Piper ONNX."""
+        if not self._piper_voice:
+            logger.warning("No local Piper voice model available to speak.")
+            return False
+
+        try:
+            bio = io.BytesIO()
+            with wave.open(bio, "wb") as wav_file:
+                self._piper_voice.synthesize_wav(text, wav_file, syn_config=self._piper_config)
+
+            bio.seek(0)
+            audio, sample_rate = sf.read(bio)
+            self._play_audio_array(audio, sample_rate)
+            return True
         except Exception as e:  # noqa: BLE001
-            logger.error("Piper offline fallback failed: %s", e)
+            logger.error("Piper in-memory synthesis failed: %s", e)
+            return False
 
     def _play_audio_bytes(self, audio_bytes: bytes) -> None:
         """Decodes in-memory MP3/WAV bytes and plays smoothly via sounddevice."""
         audio_stream = io.BytesIO(audio_bytes)
         audio_data, sample_rate = sf.read(audio_stream)
-
-        # Pad 250ms of silence at the end to prevent buffer clipping
-        padded_audio = np.pad(audio_data, (0, int(sample_rate * 0.25)))
-        sd.play(padded_audio, sample_rate)
-        sd.wait()
+        self._play_audio_array(audio_data, sample_rate)
 
 
 if __name__ == "__main__":
