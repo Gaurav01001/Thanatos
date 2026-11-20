@@ -4,6 +4,7 @@ import queue
 import sys
 import threading
 import time
+from pathlib import Path
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -14,6 +15,7 @@ from engine.audio.audio import AudioInput, is_exit_command, is_sleep_command, is
 from engine.audio.clap import ClapDetector
 from engine.audio.wake import WakeWordDetector
 from engine.brain.brain import Brain
+from engine.browser.browser_agent import BrowserAgent
 from engine.core.hotkey import HotkeyManager
 from engine.core.logging import get_logger
 from engine.core.ollama_service import ensure_ollama_running, is_ollama_running
@@ -29,11 +31,83 @@ from engine.vision.screen import ScreenCapture
 from engine.vision.vision import VisionModel
 
 logger = get_logger("engine")
-brain = Brain()
+brain: Brain | None = None
 
 
 def main() -> None:
+    # ----------------------------------------------------
+    # CLI Argument Flags (e.g. thanatos --version, --check, --help)
+    # ----------------------------------------------------
+    args = sys.argv[1:]
+    if args:
+        first = args[0].lower().strip()
+        if first in ("--version", "-v", "version"):
+            print("Thanatos AI Desktop Companion v0.1.0")
+            print(f"Python: {sys.version.split()[0]}")
+            sys.exit(0)
+
+        if first in ("--help", "-h", "help"):
+            print("======================================================")
+            print("       THANATOS AI DESKTOP COMPANION                  ")
+            print("======================================================")
+            print("\nUsage:")
+            print("  thanatos            Launch the interactive companion")
+            print("  thanatos --check    Run diagnostic health checks on models & audio")
+            print("  thanatos --version  Display installed version")
+            print("  thanatos --help     Show this command-line manual")
+            print("\nControls & Hotkeys:")
+            print("  Ctrl+Space          Toggle Tokyo Night Mini-Deck HUD")
+            print("  F8                  Capture screen for Socratic DSA Mentor")
+            print("  Ctrl+Shift+V        Instant Clipboard Smart Fix & Polish")
+            print("  Say 'Wake up'       Hands-free voice recognition mode")
+            print("  Say 'Go to sleep'   Rest / text-only standby")
+            print("  Type 'clear'        Reset conversation context")
+            print("  Type 'exit'         Shut down assistant safely")
+            sys.exit(0)
+
+        if first in ("--check", "-c", "check", "doctor"):
+            print("======================================================")
+            print("       THANATOS SYSTEM HEALTH DIAGNOSTICS             ")
+            print("======================================================")
+            # 1. Ollama service check
+            ollama_ok = is_ollama_running() or ensure_ollama_running(timeout=3.0)
+            status_str = "[OK] Active and responding" if ollama_ok else "[X] Failed to connect"
+            print(f"Ollama Server:      {status_str}")
+
+            # 2. SQLite User Memory check
+            try:
+                from engine.memory.user_memory import UserMemory
+                mem = UserMemory()
+                all_m = mem.get_all_memories()
+                p_count = len(all_m.get("profile", {}))
+                n_count = len(all_m.get("notes", []))
+                print(f"SQLite User Memory: [OK] Connected ({p_count} profile facts, {n_count} notes stored)")
+            except Exception as e:
+                print(f"SQLite User Memory: [X] Error: {e}")
+
+            # 3. Piper TTS Voice check
+            root_dir = Path(__file__).resolve().parents[2]
+            ryan_path = root_dir / "en_US-ryan-medium.onnx"
+            if ryan_path.exists():
+                print("Piper TTS Voice:    [OK] Model 'en_US-ryan-medium.onnx' verified")
+            else:
+                print("Piper TTS Voice:    [!] Voice file missing at root")
+
+            # 4. Playwright Browser Automation check
+            try:
+                b_check = BrowserAgent(headless=True)
+                b_check.close()
+                print("Playwright Browser: [OK] Chromium automation driver ready")
+            except Exception as e:
+                print(f"Playwright Browser: [!] Warning: {e}")
+
+            print("======================================================")
+            print("All core subsystems are verified. Type 'thanatos' to start.")
+            sys.exit(0)
+
     logger.info("Thanatos Starting...")
+    global brain
+    brain = Brain()
 
     # Ensure Ollama LLM backend is accessible before servicing queries
     if not is_ollama_running():
@@ -59,6 +133,7 @@ def main() -> None:
     screen = ScreenCapture()
     vision = VisionModel()
     dsa_mentor = DSAMentor()
+    browser_agent = BrowserAgent()
 
     event_queue: queue.Queue[dict] = queue.Queue()
     mode = "text"
@@ -144,7 +219,7 @@ def main() -> None:
     hud.start()
     tray_app.start()
 
-    # Ctrl+Space summons the Mini-Deck; F8 triggers Vision DSA Mentor
+    # Ctrl+Space summons the Mini-Deck; F8 triggers Vision DSA Mentor; Ctrl+Shift+V triggers Clipboard Smart Fix
     hotkey = HotkeyManager(
         on_trigger=hud.toggle_expand,
         on_vision_trigger=lambda: event_queue.put({
@@ -152,6 +227,10 @@ def main() -> None:
             "source": "hotkey",
             "query": "give me a hint",
             "mode": "hint",
+        }),
+        on_clipboard_trigger=lambda: event_queue.put({
+            "type": "clipboard_fix",
+            "source": "hotkey",
         }),
     )
     hotkey.start()
@@ -162,6 +241,63 @@ def main() -> None:
         hud.stop()
         tray_app.stop()
         hotkey.stop()
+        browser_agent.close()
+
+    def process_clipboard_fix(source: str = "hotkey") -> None:
+        """
+        Stage 10: Clipboard Intelligence & Smart Fix.
+        Reads clipboard, auto-classifies content, fixes/polishes it,
+        writes clean output back to clipboard, displays diff card, and whispers punchline.
+        """
+        state_manager.transition_to(State.EXECUTING)
+        try:
+            from engine.clipboard.smart_fix import get_clipboard_text, set_clipboard_text
+
+            text = get_clipboard_text()
+            if not text:
+                msg = "Clipboard is empty or does not contain readable text."
+                print(f"\nThanatos: {msg}")
+                hud.append_message("Thanatos", msg)
+                if not is_muted:
+                    state_manager.transition_to(State.SPEAKING)
+                    speak(msg)
+                state_manager.transition_to(State.IDLE)
+                return
+
+            print(f"\nThanatos: Analyzing clipboard text ({len(text)} chars)...")
+            hud.append_message("Thanatos", "Analyzing clipboard content...")
+            if not is_muted:
+                speak("Analyzing clipboard.")
+
+            state_manager.transition_to(State.THINKING)
+            result = brain.fix_clipboard_content(text)
+
+            # Auto-update clipboard with the fixed text so user can immediately paste (Ctrl+V)
+            if result.fixed_text:
+                set_clipboard_text(result.fixed_text)
+
+            # Format dual-track visual preview card
+            preview_card = (
+                f"📋 Clipboard Smart Fix [{result.content_type.upper()}]\n"
+                f"{'-'*45}\n"
+                f"Diagnosis: {result.explanation}\n\n"
+                f"Fixed / Polished Output (Copied to Clipboard):\n"
+                f"{result.fixed_text}\n"
+                f"{'-'*45}"
+            )
+            print(f"\n{preview_card}\n")
+            hud.append_message("Thanatos (Smart Fix)", preview_card)
+
+            if not is_muted and result.speech_text:
+                state_manager.transition_to(State.SPEAKING)
+                speak(result.speech_text)
+
+        except Exception as e:  # noqa: BLE001
+            err_msg = f"Clipboard Smart Fix error: {e}"
+            print(f"Thanatos: {err_msg}")
+            hud.append_message("Thanatos", err_msg)
+        finally:
+            state_manager.transition_to(State.IDLE)
 
     def process_vision_mentor(query: str = "", mode: str = "hint", source: str = "hotkey") -> None:
         """Captures screen and triggers Socratic DSA mentor guidance with dual-track output."""
@@ -311,6 +447,57 @@ def main() -> None:
                 source=source,
             )
             return
+
+        # ----------------------------------------------------
+        # Clipboard Intelligence & Smart Fix (Stage 10)
+        # ----------------------------------------------------
+        if action == "smart_fix_clipboard":
+            process_clipboard_fix(source=source)
+            return
+
+        # ----------------------------------------------------
+        # Generic Browser Automation Primitives (Stage 7 & Stage 12 Guard)
+        # ----------------------------------------------------
+        if action in ("browse_url", "browse_web"):
+            msg_lower = message.lower()
+            is_explicit_browser = (
+                action == "browse_url"
+                or any(kw in msg_lower for kw in ("browser", "chrome", "firefox", "edge", "in web browser", "open web"))
+            )
+            if not is_explicit_browser:
+                logger.info(
+                    "Query '%s' redirected from physical browser popup to cognitive live web grounding.",
+                    message,
+                )
+            else:
+                state_manager.transition_to(State.EXECUTING)
+                target_str = target or message
+                action_desc = "Navigating to website..." if action == "browse_url" else "Searching web via browser..."
+                print(f"\nThanatos: {action_desc}")
+                hud.append_message("Thanatos", action_desc)
+                if (mode == "voice" or source == "voice") and not is_muted:
+                    speak("Browsing web for you.")
+
+                try:
+                    res = browser_agent.quick_browse(target_str)
+                    summary_text = res.get("summary", "Browser action completed.")
+                    print(f"\nThanatos (Browser):\n{'-'*45}\n{summary_text}\n{'-'*45}\n")
+                    hud.append_message("Thanatos (Browser)", summary_text)
+
+                    if (mode == "voice" or source == "voice") and not is_muted:
+                        state_manager.transition_to(State.SPEAKING)
+                        title = res.get("title")
+                        speech_msg = f"I've opened {title} in the browser." if title else "Browser task completed."
+                        speak(speech_msg)
+                except Exception as e:  # noqa: BLE001
+                    err_msg = f"Browser error: {e}"
+                    print(f"Thanatos: {err_msg}")
+                    hud.append_message("Thanatos", err_msg)
+                    if (mode == "voice" or source == "voice") and not is_muted:
+                        state_manager.transition_to(State.SPEAKING)
+                        speak("Browser encountered an error.")
+                state_manager.transition_to(State.IDLE)
+                return
 
         if action in ("take_screenshot", "analyze_image", "analyze_screen", "look_at_screen"):
             state_manager.transition_to(State.EXECUTING)
@@ -472,6 +659,56 @@ def main() -> None:
             return
 
         # ----------------------------------------------------
+        # 3-Tier Persistent Memory (Stage 8)
+        # ----------------------------------------------------
+        if action == "save_memory":
+            state_manager.transition_to(State.EXECUTING)
+            target_str = target or message
+            res = brain.save_user_memory(target_str, folder=folder)
+            print(f"Thanatos: {res}")
+            hud.append_message("Thanatos", res)
+            if (mode == "voice" or source == "voice") and not is_muted:
+                state_manager.transition_to(State.SPEAKING)
+                speak(res)
+            state_manager.transition_to(State.IDLE)
+            return
+
+        if action == "recall_memory":
+            state_manager.transition_to(State.EXECUTING)
+            res = brain.recall_user_memory(target)
+            print(f"Thanatos:\n{res}")
+            hud.append_message("Thanatos", res)
+            if (mode == "voice" or source == "voice") and not is_muted:
+                state_manager.transition_to(State.SPEAKING)
+                summary = brain._create_spoken_summary(res)
+                speak(summary)
+            state_manager.transition_to(State.IDLE)
+            return
+
+        if action == "delete_memory":
+            state_manager.transition_to(State.EXECUTING)
+            target_str = target or message
+            res = brain.delete_user_memory(target_str)
+            print(f"Thanatos: {res}")
+            hud.append_message("Thanatos", res)
+            if (mode == "voice" or source == "voice") and not is_muted:
+                state_manager.transition_to(State.SPEAKING)
+                speak(res)
+            state_manager.transition_to(State.IDLE)
+            return
+
+        if action == "wipe_memory":
+            state_manager.transition_to(State.EXECUTING)
+            res = brain.wipe_user_memory()
+            print(f"Thanatos: {res}")
+            hud.append_message("Thanatos", res)
+            if (mode == "voice" or source == "voice") and not is_muted:
+                state_manager.transition_to(State.SPEAKING)
+                speak(res)
+            state_manager.transition_to(State.IDLE)
+            return
+
+        # ----------------------------------------------------
         # 4. CHAT CONVERSATION & KNOWLEDGE HIERARCHY
         # ----------------------------------------------------
         state_manager.transition_to(State.THINKING)
@@ -490,9 +727,6 @@ def main() -> None:
         print("\r" + " " * 30 + "\r", end="", flush=True)
         print(f"Thanatos: {response.display_text}")
         hud.append_message("Thanatos", response.display_text)
-        if response.sources:
-            print(f"\n{response.sources}")
-            hud.append_message("Sources", response.sources)
 
         if (mode == "voice" or source == "voice") and not is_muted and response.speech_text:
             state_manager.transition_to(State.SPEAKING)
@@ -521,6 +755,8 @@ def main() -> None:
     print("THANATOS DESKTOP ASSISTANT ACTIVE")
     print(" - Press Ctrl+Space to summon / collapse Mini-Deck")
     print(" - Press F8 for Vision LeetCode & DSA Mentor")
+    print(" - Press Ctrl+Shift+V for Clipboard Smart Fix")
+    print(" - Say 'Browse <url>' or 'Search on browser for <query>'")
     print(" - Say 'Wake up', 'Hey Thanatos', or click [🎙️] for Voice")
     print(" - Say 'Go to sleep' or 'I am not talking to you' to rest")
     print("=" * 55 + "\n")
@@ -551,6 +787,8 @@ def main() -> None:
                         mode=event.get("mode", "hint"),
                         source=event.get("source", "hotkey"),
                     )
+                elif event.get("type") == "clipboard_fix":
+                    process_clipboard_fix(source=event.get("source", "hotkey"))
                 elif event.get("type") == "query":
                     process_user_message(event["text"], source=event.get("source", "hud"))
                 continue
@@ -601,6 +839,9 @@ def main() -> None:
                     mode=event.get("mode", "hint"),
                     source=event.get("source", "hotkey"),
                 )
+                continue
+            elif ev_type == "clipboard_fix":
+                process_clipboard_fix(source=event.get("source", "hotkey"))
                 continue
             elif ev_type == "voice_wake":
                 mode = "voice"

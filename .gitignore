@@ -52,6 +52,7 @@ huggingface/
 bm25_index.pkl
 qdrant_data/
 benchmark_data/
+data/
 *.sqlite
 *.sqlite3
 *.db
@@ -124,12 +125,15 @@ src/*.egg-info/
 MANIFEST
 *.manifest
 *.spec
+bin/
+.playwright/
 
-# --- Local Tests, Benchmarks & Scratch Scripts ---
-tests/
-test_*.py
+# --- Local Benchmarks, Scratch Scripts & Plan Files ---
 benchmark_real.py
 evaluate_rag.py
 populate_qdrant.py
 scratch/
 *RAG_IMPLEMENTATION_PLAN.md
+tests/dense.py
+tests/x.py
+tests/*scratch*

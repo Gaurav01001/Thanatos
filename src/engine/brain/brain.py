@@ -10,8 +10,15 @@ logger = logging.getLogger(__name__)
 try:
     from engine.brain.knowledge_router import KnowledgeRouter
     from engine.brain.query_condenser import QueryCondenser
+    from engine.clipboard.smart_fix import (
+        SmartFixResult,
+        build_smart_fix_system_prompt,
+        detect_content_type,
+        parse_smart_fix_response,
+    )
     from engine.core.ollama_service import ensure_ollama_running, safe_ollama_call
     from engine.core.response import Response
+    from engine.memory.user_memory import UserMemory
     from engine.rag.rag_manager import RAGManager
     from engine.web.search import WebSearchEngine
 except (ImportError, ValueError):
@@ -22,10 +29,21 @@ except (ImportError, ValueError):
     from src.engine.brain.query_condenser import QueryCondenser
 
     # pyrefly: ignore [missing-import]
+    from src.engine.clipboard.smart_fix import (
+        SmartFixResult,
+        build_smart_fix_system_prompt,
+        detect_content_type,
+        parse_smart_fix_response,
+    )
+
+    # pyrefly: ignore [missing-import]
     from src.engine.core.ollama_service import ensure_ollama_running, safe_ollama_call
 
     # pyrefly: ignore [missing-import]
     from src.engine.core.response import Response
+
+    # pyrefly: ignore [missing-import]
+    from src.engine.memory.user_memory import UserMemory
 
     # pyrefly: ignore [missing-import]
     from src.engine.rag.rag_manager import RAGManager
@@ -45,6 +63,11 @@ class Brain: #created a blueprint or template for out brain of AI
         self._router = KnowledgeRouter()
         self._condenser = QueryCondenser()
         self._web_search = WebSearchEngine()
+        try:
+            self._user_memory = UserMemory()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to initialize UserMemory in Brain: %s", e)
+            self._user_memory = None
         self.last_sources: str | None = None
         self._system_prompt = """
 You are Thanatos, a local AI assistant.
@@ -109,12 +132,26 @@ When the user needs a serious answer, drop the humor and be serious.
                 cards = self._web_search.search(message)
                 if cards:
                     context_block, web_sources = self._web_search.format_context(cards)
-                    web_system_prompt = f"""You are Thanatos, a desktop AI assistant.
-Answer the user's question accurately using the live web search results below.
-Be concise, direct, and structured. Include relevant details and specifics.
+                    user_context = self._user_memory.build_context_prompt() if self._user_memory else ""
+                    web_system_prompt = f"""You are Thanatos, an intelligent, perceptive desktop personal AI assistant.
+Answer the user's question directly, accurately, and conversationally using the live web search findings below.
 
-Live Web Results:
+Guidelines:
+1. Direct Recommendations & Specifics: If the user is asking for product suggestions, recommendations, or buying advice (e.g. perfumes, tech, clothes, places):
+   - Suggest 2 to 3 specific items that match their constraints (budget, season, preferences).
+   - State the approximate real-world price (e.g. ₹X,XXX or $XX) and why it fits (scent notes, specs, pros/cons).
+   - Name a clear top pick or best overall value.
+2. Fact & Information Queries: If the user is asking about current events, sports, weather, or release dates, state the direct facts immediately.
+3. Conversational Tone: Speak naturally like an expert friend (e.g. "You could go for...", "A great pick is...").
+4. Zero "Go Search Yourself": NEVER tell the user to go visit a website or search Google/Amazon themselves—synthesize and deliver the actual recommendation directly.
+5. Formatting: Use clean markdown bullet points for readability.
+
+User Location / Locale: {self._web_search.location}
+
+Live Web Search Findings:
 {context_block}"""
+                    if user_context:
+                        web_system_prompt = f"{web_system_prompt}\n\n{user_context}"
                     web_messages = [
                         {"role": "system", "content": web_system_prompt},
                         *self._conversation,
@@ -147,8 +184,13 @@ Live Web Results:
 
         # 3. CONVERSATIONAL -> Direct LLM chat
         self.last_sources = None
+        user_context = self._user_memory.build_context_prompt() if self._user_memory else ""
+        system_content = self._system_prompt
+        if user_context:
+            system_content = f"{self._system_prompt}\n\n{user_context}"
+
         messages = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": system_content},
             *self._conversation
         ]
         try:
@@ -248,6 +290,93 @@ Live Web Results:
         if any(p in clean for p in solution_phrases):
             return {"action": "dsa_mentor", "target": message, "folder": "solution"}
 
+        # 0ms Fast-Path 1.8: Browser Automation Primitives (Stage 7)
+        browse_url_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:browse to|browse|visit|go to|open website|open url|navigate to)\s+(https?://\S+|[a-zA-Z0-9_\-]+\.[a-zA-Z]{2,}(?:/\S*)?)$",
+            clean,
+        )
+        if browse_url_match:
+            target = browse_url_match.group(1).strip()
+            return {"action": "browse_url", "target": target, "folder": None}
+
+        browser_search_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:search on browser for|browser search for|browser search|search in browser for|search web on browser for|open browser and search for)\s+(.+)$",
+            clean,
+        )
+        if browser_search_match:
+            target = browser_search_match.group(1).strip()
+            return {"action": "browse_web", "target": target, "folder": None}
+
+        # 0ms Fast-Path 1.9: Persistent User Memory (Stage 8)
+        # 1. Wipe all memory (Requires confirmation)
+        if clean in (
+            "clear all memories", "clear my memory", "wipe my memory", "wipe memory",
+            "forget everything about me", "erase all memories", "delete all memories",
+            "clear all memory", "wipe all memory", "reset all memory"
+        ):
+            return {"action": "wipe_memory", "target": None, "folder": None}
+
+        # 2. Specific Name / Identity Recall
+        if clean in (
+            "what is my name", "what's my name", "do you know my name", "who am i",
+            "tell me my name", "do you know who i am", "what is my identity"
+        ):
+            return {"action": "recall_memory", "target": "name", "folder": "query"}
+
+        # 3. General Memory Recall
+        if clean in (
+            "what do you know about me", "what do you remember about me", "show my memories",
+            "show saved memories", "list my memories", "what are my preferences",
+            "show my preferences", "what do you remember", "show memory", "my saved info"
+        ):
+            return {"action": "recall_memory", "target": None, "folder": "all"}
+
+        # 4. Save User Fact / Name: "my name is <name>", "call me <name>"
+        name_match = re.match(
+            r"^(?:hi\s+|hello\s+|hey\s+)?(?:my name is|call me)\s+([a-zA-Z0-9_\-\.\s]+?)$",
+            clean,
+        )
+        if name_match and not any(k in clean for k in ("listening", "ready", "running", "talking", "asking", "writing")):
+            target = name_match.group(1).strip()
+            return {"action": "save_memory", "target": f"name: {target}", "folder": "profile"}
+
+        # 5. Attribute Specific Recall: "what is my <attribute>", "do you remember my <attribute>"
+        attr_recall_match = re.match(
+            r"^(?:can you tell me\s+|do you know\s+|what is\s+|what's\s+|do you remember\s+|tell me\s+)my\s+([a-zA-Z0-9_\-\s]+?)$",
+            clean,
+        )
+        if attr_recall_match and not any(k in clean for k in ("screen", "code", "file", "folder", "app")):
+            target = attr_recall_match.group(1).strip()
+            return {"action": "recall_memory", "target": target, "folder": "query"}
+
+        # 6. Delete specific memory: "forget my <attribute>", "delete memory about <attribute>"
+        forget_match = re.match(
+            r"^(?:please\s+|can you\s+)?(?:forget|delete memory(?: about)?)\s+(?:my\s+)?([a-zA-Z0-9_\-\s]+?)$",
+            clean,
+        )
+        if forget_match:
+            target = forget_match.group(1).strip()
+            return {"action": "delete_memory", "target": target, "folder": "key"}
+
+        # 7. Explicit Remember Directive: "remember that <fact>", "remember <fact>"
+        remember_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:remember that|remember|save memory(?: that)?|keep in mind that)\s+(.+)$",
+            clean,
+        )
+        if remember_match:
+            target = remember_match.group(1).strip()
+            return {"action": "save_memory", "target": target, "folder": "note"}
+
+        # 8. Preference Stating: "my favorite <item> is <val>", "my preferred <item> is <val>"
+        pref_match = re.match(
+            r"^(?:my favorite|my preferred)\s+([a-zA-Z0-9_\-\s]+?)\s+is\s+(.+)$",
+            clean,
+        )
+        if pref_match:
+            item = pref_match.group(1).strip()
+            val = pref_match.group(2).strip()
+            return {"action": "save_memory", "target": f"{item}: {val}", "folder": "profile"}
+
         # 0ms Fast-Path 2: Open application or document
         open_match = re.match(
             r"^(?:can you\s+|could you\s+|please\s+)?(?:open|launch|start|run)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+browser|\s+app|\s+application)?$",
@@ -297,7 +426,16 @@ Live Web Results:
             target = paste_match.group(1).strip()
             return {"action": "paste_text", "target": target, "folder": None}
 
-        # 0ms Fast-Path 7: Conversational questions / chit-chat
+        # 0ms Fast-Path 7: Clipboard Intelligence & Smart Fix (Stage 10)
+        clipboard_match = re.match(
+            r"^(?:can you\s+|could you\s+|please\s+)?(?:smart\s*fix|fix\s+clipboard|fix\s+my\s+clipboard|polish\s+clipboard|check\s+clipboard|analyze\s+clipboard)(?:\s+(.+))?$",
+            clean,
+        )
+        if clipboard_match or clean in ("smart fix", "fix clipboard", "fix my clipboard", "polish clipboard", "smartfix"):
+            target = clipboard_match.group(1).strip() if (clipboard_match and clipboard_match.group(1)) else None
+            return {"action": "smart_fix_clipboard", "target": target, "folder": None}
+
+        # 0ms Fast-Path 8: Conversational questions / chit-chat
         chat_starts = (
             "hi", "hello", "hey", "who", "what", "where", "when", "why", "how",
             "can you", "could you", "tell me", "explain", "generate",
@@ -343,7 +481,14 @@ Allowed actions:
 - "send_email": When user asks to send or dispatch an email. Set "target" to recipient or topic. "folder": null.
 - "send_message": When user asks to send or post a message. Set "target" to recipient or topic. "folder": null.
 - "dsa_mentor": When user asks for a hint, debugging help, time complexity, or algorithmic guidance on code or a problem visible on their screen (e.g. "give me a hint", "why does test 3 fail", "check my code", "what's the time complexity"). Set "target" to the user query and "folder" to mode ("hint", "debug", "complexity", or "solution").
-- "chat": For all conversations, greetings, general questions, asking about document contents/authors/facts (e.g. "who prepared notes in aiml.pdf?", "what does the PDF say?"), or help. "target": null, "folder": null.
+- "browse_url": When the user asks to visit, navigate to, or browse a specific web URL or website (e.g. "visit github.com", "browse https://news.ycombinator.com", "go to wikipedia.org", "open website arxiv.org"). Set "target" to the URL or domain. "folder": null.
+- "browse_web": ONLY when the user explicitly asks to open, control, or use their web browser to search or view web pages (e.g. "open browser and search for laptops", "search on browser for Python docs", "in chrome search for ..."). DO NOT use this for normal questions, product suggestions, recommendations, prices, or advice (use "chat" instead). Set "target" to the query. "folder": null.
+- "save_memory": When the user tells you personal facts, preferences, their name, or asks you to remember something (e.g. "my name is Gaurav", "remember that I code in Python", "remember that I prefer dark mode"). Set "target" to the fact or preference. "folder": "profile" or "note".
+- "recall_memory": When the user asks what you know/remember about them, or asks for their name/preferences (e.g. "what is my name?", "who am I?", "what do you remember about me?", "show my preferences"). Set "target" to the specific attribute name (e.g. "name") or null for all memories. "folder": null.
+- "delete_memory": When the user asks to forget a specific fact (e.g. "forget my name", "delete memory about project"). Set "target" to the attribute to forget. "folder": null.
+- "wipe_memory": When the user asks to erase all memories or forget everything about them (e.g. "forget everything about me", "clear all saved memories"). "target": null, "folder": null.
+- "smart_fix_clipboard": When the user asks to inspect, fix, debug, format, or polish whatever is copied in their clipboard (e.g. "smart fix", "fix clipboard", "fix my clipboard", "polish clipboard"). Set "target" to null and "folder" to null.
+- "chat": For all conversations, greetings, questions, product suggestions, recommendations, buying advice, prices, reviews, comparisons, asking about document contents/authors/facts (e.g. "suggest a winter perfume", "what is the best phone under 20k", "who prepared notes in aiml.pdf?"), or help. "target": null, "folder": null.
 
 Return ONLY a JSON object:"""
 
@@ -425,34 +570,193 @@ Return ONLY a JSON object:"""
         except Exception as e:  # noqa: BLE001
             logger.error("Failed to draft text via Ollama: %s", e)
             return prompt.strip()
+
+    @property
+    def user_memory(self) -> Optional[UserMemory]:
+        """Provides direct access to the persistent UserMemory subsystem."""
+        return self._user_memory
+
+    def save_user_memory(self, target: str, folder: Optional[str] = "note") -> str:
+        """
+        Parses and stores a user fact or note into persistent memory.
+        """
+        if not self._user_memory:
+            return "Persistent memory subsystem is unavailable."
+
+        clean_target = target.strip()
+        if ":" in clean_target and (folder == "profile" or clean_target.lower().startswith("name:")):
+            key, val = clean_target.split(":", 1)
+            self._user_memory.set_fact(key.strip(), val.strip())
+            return f"I've remembered that your {key.strip()} is {val.strip()}."
+
+        self._user_memory.add_note(clean_target)
+        return f"I've committed that to memory: \"{clean_target}\"."
+
+    def recall_user_memory(self, target: Optional[str] = None) -> str:
+        """
+        Recalls specific facts (e.g. 'name') or returns a summary of all memories.
+        """
+        if not self._user_memory:
+            return "Persistent memory subsystem is unavailable."
+
+        if target and target.lower() in ("name", "who am i", "my name"):
+            name = self._user_memory.get_fact("name")
+            if name:
+                return f"Your name is {name}."
+            return "I don't have your name saved in my memory yet. You can tell me by saying 'My name is [name]'."
+
+        if target and target.lower() not in ("all", ""):
+            fact = self._user_memory.get_fact(target)
+            if fact:
+                return f"Your {target} is {fact}."
+
+        memories = self._user_memory.get_all_memories()
+        profile = memories["profile"]
+        notes = memories["notes"]
+
+        if not profile and not notes:
+            return "My memory is currently empty. You can teach me facts about yourself, like 'My name is Gaurav' or 'Remember that I code in Python'."
+
+        lines = ["Here is what I remember about you:"]
+        if profile:
+            lines.append("\nProfile:")
+            for k, v in profile.items():
+                lines.append(f" - {k.capitalize()}: {v}")
+
+        if notes:
+            lines.append("\nSaved Notes & Preferences:")
+            for n in notes:
+                lines.append(f" - {n['content']}")
+
+        return "\n".join(lines)
+
+    def delete_user_memory(self, target: str) -> str:
+        """
+        Deletes a specific fact from persistent memory.
+        """
+        if not self._user_memory:
+            return "Persistent memory subsystem is unavailable."
+
+        clean = target.strip().lower()
+        if self._user_memory.delete_fact(clean):
+            return f"I've forgotten your {clean}."
+        return f"I couldn't find '{clean}' in my memory records."
+
+    def wipe_user_memory(self) -> str:
+        """
+        Wipes the entire persistent memory store.
+        """
+        if not self._user_memory:
+            return "Persistent memory subsystem is unavailable."
+
+        self._user_memory.clear_all()
+        return "All persistent memories have been completely erased."
+
+    def fix_clipboard_content(self, text: str) -> SmartFixResult:
+        """
+        Stage 10: Clipboard Intelligence & Smart Fix.
+        Analyzes clipboard text, detects content type, applies tailored LLM fixes/polishing,
+        and returns a structured SmartFixResult.
+        """
+        if not text or not text.strip():
+            return SmartFixResult(
+                content_type="empty",
+                original_text="",
+                fixed_text="",
+                explanation="Your clipboard is empty or does not contain text.",
+                speech_text="Your clipboard is empty.",
+            )
+
+        content_type = detect_content_type(text)
+        system_prompt = build_smart_fix_system_prompt(content_type)
+
+        try:
+            response = safe_ollama_call(
+                ollama.chat,
+                model="qwen2.5-coder:7b",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+            )
+            raw_content = (
+                response.message.content
+                if hasattr(response, "message")
+                else response["message"]["content"]
+            )
+            fixed_text, explanation, speech_text = parse_smart_fix_response(
+                str(raw_content or ""), content_type
+            )
+            return SmartFixResult(
+                content_type=content_type,
+                original_text=text,
+                fixed_text=fixed_text,
+                explanation=explanation,
+                speech_text=speech_text,
+            )
+        except Exception as e:
+            logger.error("Failed to fix clipboard content via Ollama: %s", e)
+            return SmartFixResult(
+                content_type=content_type,
+                original_text=text,
+                fixed_text=text,
+                explanation=f"Error analyzing clipboard content: {e}",
+                speech_text="Sorry, something went wrong while analyzing your clipboard.",
+            )
     
     def _create_spoken_summary(self, text: str) -> str:
+        """
+        Synthesizes a complete, natural, punchy spoken summary for voice output.
+        Guarantees that statements are never cut off mid-thought or mid-sentence.
+        """
         if not text:
             return ""
 
-        clean = re.sub(r"\[Source\s*\d+[^\]]*\]", "", text).strip()
+        clean = re.sub(r"\[(?:Source|Web)\s*\d+[^\]]*\]", "", text).strip()
         clean_no_code = re.sub(r"```[\s\S]*?```", "", clean).strip()
-        lines = [line.strip() for line in clean_no_code.splitlines() if line.strip()]
-        
-        filtered_lines = [
-            line for line in lines 
-            if not line.startswith(("#", "```", "---", "==="))
-        ]
-        if not filtered_lines:
-            return "Here is the requested code."
-        joined_text = " ".join(filtered_lines)
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", joined_text) if s.strip()]
+
+        # Strip markdown headers, bold, italics, backticks
+        clean_no_code = re.sub(r"^#+\s*", "", clean_no_code, flags=re.MULTILINE)
+        clean_no_code = re.sub(r"[*_~`]", "", clean_no_code)
+
+        lines = []
+        for line in clean_no_code.splitlines():
+            line = line.strip()
+            if not line or line.startswith(("---", "===")):
+                continue
+            # Remove leading list numbering or bullet markers: '1. ', '- ', '• '
+            line = re.sub(r"^\d+\.\s*", "", line)
+            line = re.sub(r"^[-•*]\s*", "", line)
+            lines.append(line)
+
+        if not lines:
+            return "Here is the requested information."
+
+        joined = " ".join(lines)
+        # Convert introductory colons (e.g. "Here are the best substitutes:") into natural clauses
+        intro_phrases = ("here are", "for ", "the best", "top ", "you can", "you have", "there are")
+        if joined.count(":") > 0 and any(joined.lower().startswith(p) for p in intro_phrases):
+            joined = re.sub(r":\s*", ", such as ", joined, count=1)
+
+        # Split into complete sentences
+        raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", joined) if s.strip()]
+        sentences = [s for s in raw_sentences if len(re.sub(r"[^a-zA-Z0-9]", "", s)) > 1]
+
         if not sentences:
-            return joined_text
+            return "I have displayed the full details on your screen."
 
-        # If it's already concise (1-2 sentences), speak it cleanly
-        if len(sentences) <= 2 and len(joined_text) <= 220:
-            return joined_text
+        # Take lead 1-2 complete sentences
+        summary = sentences[0]
+        if len(sentences) > 1 and len(summary) < 140:
+            summary = f"{summary} {sentences[1]}"
 
-        # Otherwise extract the punchy lead sentences directly
-        summary = " ".join(sentences[:2])
-        if len(summary) > 220:
-            summary = sentences[0]
+        if not summary.endswith((".", "!", "?")):
+            summary += "."
+
+        if len(sentences) > 2 or len(joined) > 220:
+            if not summary.endswith("on your screen."):
+                summary += " I've displayed the full details on your screen."
+
         return summary
         
         

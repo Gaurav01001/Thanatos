@@ -71,6 +71,12 @@ class SecurityValidator:
         "ask_document",
         "write_text",
         "paste_text",
+        "browse_url",
+        "browse_web",
+        "save_memory",
+        "recall_memory",
+        "delete_memory",
+        "smart_fix_clipboard",
     }
 
     # Actions that should require user confirmation.
@@ -82,6 +88,7 @@ class SecurityValidator:
         "close_application",
         "send_email",
         "send_message",
+        "wipe_memory",
     }
 
     def _contains_dangerous_characters(self, value: str) -> Optional[str]:
@@ -237,6 +244,29 @@ class SecurityValidator:
 
         return True, None
 
+    def validate_url(self, raw_url: str) -> Tuple[bool, Optional[str]]:
+        """
+        Validates URL target to prevent injection, dangerous file access, or loopback probing.
+        """
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            return False, "URL target cannot be empty."
+
+        clean = raw_url.strip()
+        # Prevent control/dangerous characters
+        char_check = self._contains_dangerous_characters(clean)
+        if char_check:
+            return False, char_check
+
+        lower_url = clean.lower()
+        blocked_schemes = ("file:", "javascript:", "data:", "vbscript:", "about:", "chrome:")
+        if any(lower_url.startswith(scheme) for scheme in blocked_schemes):
+            return False, f"Security Alert: Unsafe URL scheme in '{clean}' is blocked."
+
+        if "169.254.169.254" in lower_url or "metadata.google.internal" in lower_url:
+            return False, "Security Alert: Access to metadata endpoints is prohibited."
+
+        return True, None
+
     def validate_intent(
         self,
         intent: dict
@@ -281,8 +311,8 @@ class SecurityValidator:
                 f"Action '{action}' requires user confirmation."
             )
 
-        # Normal conversation needs no target.
-        if action == "chat":
+        # Actions that require no explicit target.
+        if action in ("chat", "recall_memory", "smart_fix_clipboard"):
             return "SAFE", None
 
         # All other supported actions need a target.
@@ -334,6 +364,24 @@ class SecurityValidator:
 
         # Desktop typing and writing automation.
         if action in ("write_text", "paste_text"):
+            return "SAFE", None
+
+        # Browser automation validation
+        if action in ("browse_url", "browse_web"):
+            safe, reason = self.validate_url(target)
+            if not safe:
+                return "BLOCKED", reason
+            return "SAFE", None
+
+        # Persistent memory validation (Stage 8)
+        if action in ("save_memory", "delete_memory"):
+            reason = self._contains_dangerous_characters(target.strip())
+            if reason:
+                return "BLOCKED", reason
+            return "SAFE", None
+
+        # Clipboard Smart Fix (Stage 10)
+        if action == "smart_fix_clipboard":
             return "SAFE", None
 
         # Fail closed.

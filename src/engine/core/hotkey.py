@@ -24,6 +24,8 @@ class HotkeyManager:
         on_trigger: Callable[[], None] | None = None,
         vision_hotkey: str | None = None,
         on_vision_trigger: Callable[[], None] | None = None,
+        clipboard_hotkey: str | None = None,
+        on_clipboard_trigger: Callable[[], None] | None = None,
         config_path: Path | None = None,
     ) -> None:
         self.config_path = config_path or (Path(__file__).resolve().parents[3] / "config.json")
@@ -33,10 +35,12 @@ class HotkeyManager:
         self.hud_hotkey_str = hotkey or config_data.get("hotkey", "<ctrl>+<space>")
         self.hotkey_str = self.hud_hotkey_str  # Backwards compatibility alias
         self.vision_hotkey_str = vision_hotkey or config_data.get("vision_hotkey", "<f8>")
+        self.clipboard_hotkey_str = clipboard_hotkey or config_data.get("clipboard_hotkey", "<ctrl>+<shift>+v")
         
         # Callbacks
         self.on_hud_trigger = on_trigger
         self.on_vision_trigger = on_vision_trigger
+        self.on_clipboard_trigger = on_clipboard_trigger
         
         # Per-hotkey debounce tracking (400ms guard)
         self._last_triggers: dict[str, float] = {}
@@ -89,16 +93,29 @@ class HotkeyManager:
             except Exception as e:
                 logger.error("Error executing vision hotkey callback: %s", e)
 
+    def _handle_clipboard_trigger(self) -> None:
+        """Debounced callback for Clipboard Smart Fix (Stage 10)."""
+        if self._debounce("clipboard"):
+            return
+        logger.info("Clipboard Smart Fix hotkey triggered: %s", self.clipboard_hotkey_str)
+        if self.on_clipboard_trigger:
+            try:
+                self.on_clipboard_trigger()
+            except Exception as e:
+                logger.error("Error executing clipboard hotkey callback: %s", e)
+
     def start(self) -> bool:
         """Starts the multi-hotkey listener thread."""
         if self._listener is not None:
             return True
 
         mapping = {}
-        if self.on_hud_trigger:
+        if self.on_hud_trigger and self.hud_hotkey_str:
             mapping[self.hud_hotkey_str] = self._handle_hud_trigger
-        if self.on_vision_trigger:
+        if self.on_vision_trigger and self.vision_hotkey_str:
             mapping[self.vision_hotkey_str] = self._handle_vision_trigger
+        if self.on_clipboard_trigger and self.clipboard_hotkey_str:
+            mapping[self.clipboard_hotkey_str] = self._handle_clipboard_trigger
 
         # If no callbacks were explicitly registered, register HUD default
         if not mapping and self.hud_hotkey_str:

@@ -36,8 +36,8 @@ def clean_text_for_speech(text: str) -> str:
     # 2. Strip inline code backticks (`code` -> code)
     text = re.sub(r"`([^`]+)`", r"\1", text)
 
-    # 3. Strip citation markers like [Source 1], [Source 1, 2], [Source 2-4]
-    text = re.sub(r"\[Source\s*[\d,\s-]+\]", "", text, flags=re.IGNORECASE)
+    # 3. Strip citation markers like [Source 1], [Web 1: ...], [Source 2-4]
+    text = re.sub(r"\[(?:Source|Web)\s*[^\]]*\]", "", text, flags=re.IGNORECASE)
 
     # 4. Remove Markdown headers (#, ##, ###)
     text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
@@ -47,16 +47,28 @@ def clean_text_for_speech(text: str) -> str:
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
     text = re.sub(r"__([^_]+)__", r"\1", text)
 
-    # 6. Replace URLs with simple word 'link'
-    text = re.sub(r"https?://\S+", "link", text)
+    # 6. Remove URLs completely (so TTS never spells out links)
+    text = re.sub(r"https?://\S+", "", text)
 
-    # 7. Clean bullet list markers (*, -, •)
+    # 7. Clean bullet list markers (*, -, •, 1., 2.)
     text = re.sub(r"^\s*[-*•]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
 
-    # 8. Collapse whitespace into clean single spaces
+    # 8. Convert currency and numbers for smooth vocal pronunciation
+    text = re.sub(r"₹\s*(\d+(?:,\d+)*)", r"\1 rupees", text)
+    text = re.sub(r"\$\s*(\d+(?:,\d+)*)", r"\1 dollars", text)
+    text = re.sub(r"~\s*", "about ", text)
+
+    # 9. Convert ratios like 1:1 into natural speech
+    text = re.sub(r"\b(\d+):(\d+)\b", r"\1 to \2", text)
+
+    # 10. Strip remaining stray asterisks, tildes, hashes
+    text = re.sub(r"[*_~`#]", "", text)
+
+    # 11. Collapse whitespace into clean single spaces
     text = re.sub(r"\s+", " ", text).strip()
 
-    # 9. Ensure ending punctuation for natural vocal cadence
+    # 12. Ensure ending punctuation for natural vocal cadence
     if text and not text.endswith((".", "!", "?")):
         text += "."
 
@@ -111,7 +123,7 @@ class TextToSpeech:
     def __init__(
         self,
         profile: str = "jarvis",
-        speed: float = 1.15,
+        speed: float = 1.0,
         edge_voice: str | None = None,
         rate: str | None = None,
         pitch: str | None = None,
@@ -247,6 +259,74 @@ class TextToSpeech:
             logger.warning("Edge-TTS synthesis error: %s", e)
             return False
 
+    def _get_output_device_and_rate(self) -> tuple[int | None, float]:
+        """
+        Determines the optimal audio output device and sample rate.
+        Prefers Windows WASAPI for low-latency, zero-jitter, clean playback.
+        """
+        try:
+            apis = sd.query_hostapis()
+            wasapi_api_idx = next(
+                (i for i, api in enumerate(apis) if "WASAPI" in api.get("name", "")),
+                None,
+            )
+            if wasapi_api_idx is not None:
+                wasapi_devices = [
+                    (idx, d)
+                    for idx, d in enumerate(sd.query_devices())
+                    if d.get("hostapi") == wasapi_api_idx and d.get("max_output_channels", 0) > 0
+                ]
+                if wasapi_devices:
+                    # Prefer primary speaker device on WASAPI
+                    for idx, d in wasapi_devices:
+                        name = d.get("name", "")
+                        if "Speakers" in name or "Default" in name or "Headphones" in name:
+                            return idx, float(d.get("default_samplerate", 48000.0))
+                    return wasapi_devices[0][0], float(wasapi_devices[0][1].get("default_samplerate", 48000.0))
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            default_out = sd.default.device[1] if isinstance(sd.default.device, (list, tuple)) else None
+            if default_out is not None and default_out >= 0:
+                def_dev = sd.query_devices(default_out)
+                return default_out, float(def_dev.get("default_samplerate", 44100.0))
+        except Exception:  # noqa: BLE001
+            pass
+
+        return None, 44100.0
+
+    def _play_audio_array(self, audio: np.ndarray, sample_rate: int) -> None:
+        """Plays audio array with automatic sample rate matching and flush padding."""
+        dev_idx, target_rate = self._get_output_device_and_rate()
+        target_sr = int(target_rate)
+
+        # 1. High-Quality Anti-Aliased Resampling to match DAC hardware clock
+        if sample_rate != target_sr and len(audio) > 0:
+            try:
+                import scipy.signal
+                num_target_samples = int(len(audio) * target_sr / sample_rate)
+                audio = scipy.signal.resample(audio, num_target_samples)
+                sample_rate = target_sr
+            except Exception as e:
+                logger.debug("Resampling skipped: %s", e)
+
+        # 2. Generous 0.5s Trailing Silence Padding
+        # Ensures DAC and Windows audio engine flush the final word completely before closing
+        padded_audio = np.pad(audio, (0, int(sample_rate * 0.5)))
+
+        # 3. Play through low-latency stream
+        try:
+            if dev_idx is not None:
+                sd.play(padded_audio, sample_rate, device=dev_idx)
+            else:
+                sd.play(padded_audio, sample_rate)
+            sd.wait()
+        except Exception as e:
+            logger.warning("Preferred audio device failed (%s), falling back to default.", e)
+            sd.play(padded_audio, sample_rate)
+            sd.wait()
+
     def _speak_piper(self, text: str) -> bool:
         """Local offline zero-latency voice synthesis via in-memory Piper ONNX."""
         if not self._piper_voice:
@@ -260,9 +340,7 @@ class TextToSpeech:
 
             bio.seek(0)
             audio, sample_rate = sf.read(bio)
-            padded_audio = np.pad(audio, (0, int(sample_rate * 0.15)))
-            sd.play(padded_audio, sample_rate)
-            sd.wait()
+            self._play_audio_array(audio, sample_rate)
             return True
         except Exception as e:  # noqa: BLE001
             logger.error("Piper in-memory synthesis failed: %s", e)
@@ -272,11 +350,7 @@ class TextToSpeech:
         """Decodes in-memory MP3/WAV bytes and plays smoothly via sounddevice."""
         audio_stream = io.BytesIO(audio_bytes)
         audio_data, sample_rate = sf.read(audio_stream)
-
-        # Pad 250ms of silence at the end to prevent buffer clipping
-        padded_audio = np.pad(audio_data, (0, int(sample_rate * 0.25)))
-        sd.play(padded_audio, sample_rate)
-        sd.wait()
+        self._play_audio_array(audio_data, sample_rate)
 
 
 if __name__ == "__main__":

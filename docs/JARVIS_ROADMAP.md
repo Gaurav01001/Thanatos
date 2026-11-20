@@ -104,8 +104,8 @@ flowchart TD
     M4["Stage 4: Floating HUD & System Tray 🖥️<br>(Unobtrusive UI, Waveform, RAG Inspector)"]
     M5["Stage 5: Desktop Typing & Safe Writing ✅<br>(pynput + clipboard injection + confirmation - DONE)"]
     M6["Stage 6: Vision Hotkey & LeetCode Companion ✅<br>(Global Hotkey F8 + Socratic Hint Engine - DONE)"]
-    M7["Stage 7: Generic Browser Automation Agent 🎯<br>(Playwright Primitives: navigate, click, type)"]
-    M8["Stage 8: 3-Tier Persistent Memory 🧠<br>(User Preferences + Conversation + Vector Qdrant)"]
+    M7["Stage 7: Generic Browser Automation Agent ✅<br>(Playwright Primitives: navigate, search, click, type - DONE)"]
+    M8["Stage 8: 3-Tier Persistent Memory 🎯<br>(User Preferences + Conversation + Vector Qdrant)"]
     M9["Stage 9: Universal 1-Click Distribution 📦<br>(PowerShell install.ps1 installer)"]
 
     M1 --> M2 --> M3 --> M4 --> M5 --> M6 --> M7 --> M8 --> M9
@@ -236,8 +236,21 @@ flowchart TD
 
 ---
 
-### Stage 7: Generic Browser Automation Primitives
+### Stage 7: Generic Browser Automation Primitives (Status: ✅ COMPLETED)
 - **Goal**: Headless or visible browser tasks using clean, reusable automation primitives rather than brittle website-specific hacks.
+- **Implemented & Verified**:
+  - `src/engine/browser/browser_agent.py`: Implemented robust `BrowserAgent` using Playwright with core primitives:
+    - `navigate(url)`: Scheme-safe URL validation, domain normalization, and DOM content loaded synchronization.
+    - `search(query, engine)`: Multi-engine web search with resilient card/link extraction.
+    - `click(selector_or_text)`: Multi-strategy locator resolution (CSS selector, text, button role).
+    - `type(text, selector)`: Input typing with optional clear and Enter submission.
+    - `extract(selector)`: Structured reading prioritizing `<main>`, `<article>`, and headings.
+    - `quick_browse(query_or_url)`: Smart router recipe discerning URLs vs. web queries.
+    - `close()`: Clean lifecycle resource teardown and auto-recovery.
+  - `src/engine/security/validator.py`: Registered `"browse_url"` and `"browse_web"` in `SAFE_ACTIONS`; added strict URL protocol sanitization blocking dangerous schemes (`file://`, `javascript:`, `data:`, `vbscript:`) and cloud metadata endpoints (`169.254.169.254`).
+  - `src/engine/brain/brain.py`: Added 0ms fast-path intent matching for browser commands (*"browse <url>"*, *"visit <domain>"*, *"search on browser for <query>"*) and LLM fallback prompt descriptions.
+  - `src/engine/__main__.py`: Connected end-to-end non-blocking execution via `process_user_message` with `State.EXECUTING`, live HUD Mini-Deck preview cards, Piper TTS voice confirmation, and clean shutdown teardown.
+  - `tests/test_stage7_browser.py`: Comprehensive test suite verifying URL safety rules, security validator integration, brain intent classification, mock browser primitives, and live headless Playwright navigation passing 100% green.
 - **Implementation**:
   - Build `BrowserAgent` using Playwright with core primitives:
     - `navigate(url)`
@@ -250,18 +263,91 @@ flowchart TD
 
 ---
 
-### Stage 8: 3-Tier Persistent Memory
-- **Goal**: Cross-session user personalization and continuous learning.
-- **Implementation**:
-  - Store user preferences, active projects, and personal facts in a local SQLite / JSON store (`UserMemory`).
-  - Automatically inject relevant user context into `Brain.respond()`.
+### Stage 8: 3-Tier Persistent Memory (Status: ✅ COMPLETED)
+- **Goal**: Cross-session user personalization and continuous learning without cloud dependency.
+- **Implemented & Verified**:
+  - `src/engine/memory/user_memory.py`: Implemented robust `UserMemory` backed by native SQLite:
+    - `user_profile` table for key-value facts (name, language, OS, occupation) with case-insensitive normalization.
+    - `user_notes` table for open-ended episodic observations with automatic deduplication.
+    - `@contextmanager` safe connection lifecycle management with WAL support and thread-safe locking.
+    - `build_context_prompt()`: Compact Markdown context injection block for prompt engineering with negligible token overhead (~25-40 tokens).
+  - `src/engine/security/validator.py`: Registered `"save_memory"`, `"recall_memory"`, and `"delete_memory"` in `SAFE_ACTIONS`; registered destructive `"wipe_memory"` in `CONFIRM_ACTIONS` with strict confirmation challenge (`"Thanatos: Proceed? (yes/no)"`).
+  - `src/engine/brain/brain.py`:
+    - Integrated `UserMemory` with 0ms regex fast-paths for saving facts, recalling identity, and deleting memories.
+    - Dynamic injection of user context into LLM system prompts across general chat and web searches.
+    - Added Qwen LLM function schema for contextual fallback intent classification.
+    - Provided direct brain helper methods (`save_user_memory`, `recall_user_memory`, `delete_user_memory`, `wipe_user_memory`).
+  - `src/engine/__main__.py`: Connected end-to-end memory dispatch handlers into the reactive loop with dual-track terminal cards, Tokyo Night Mini-Deck HUD updates, and Piper TTS voice confirmation.
+  - `tests/test_stage8_memory.py`: 9 dedicated unit and integration tests covering SQLite CRUD, cross-session persistence, context generation, security validation gates, and intent classification passing 100% green.
 
 ---
 
-### Stage 9: Universal 1-Click Terminal Distribution
-- **Goal**: Effortless installation for anyone on Windows.
-- **Implementation** (Only when stages 1–8 are frozen and stable):
+### Stage 9: Universal 1-Click Terminal Distribution (Status: ✅ COMPLETED)
+- **Goal**: Effortless 1-click installation for anyone on Windows.
+- **Implemented & Verified**:
+  - `install.ps1`: Complete 5-step unattended installer for Windows 10/11:
+    - **Step 1 (Pre-Flight)**: Auto-detects Windows, Git, Python 3.10+, and Ollama; auto-installs missing prerequisites via `winget`.
+    - **Step 2 (Workspace)**: Clones or links repo directory and prepares `data/`, `logs/`, and `bin/`.
+    - **Step 3 (Venv & Dependencies)**: Creates isolated `.venv`, upgrades pip/setuptools, installs `requirements.txt`, registers editable package, and installs Playwright Chromium drivers.
+    - **Step 4 (Models & Voice)**: Checks existing local Ollama models (`qwen2.5-coder:7b`, `gemma3:4b`), pulls missing ones without redownload, and downloads Piper TTS voice files.
+    - **Step 5 (Global CLI & Shortcuts)**: Creates `bin/thanatos.cmd` and `bin/thanatos.ps1`, registers `bin/` to Windows User `PATH`, and creates a Windows Desktop shortcut.
+  - `src/engine/__main__.py`: Built-in CLI argument handling:
+    - `thanatos --version`: Instant version information.
+    - `thanatos --help`: Complete command manual and hotkey guide.
+    - `thanatos --check`: Diagnostic health check verifying Ollama, SQLite memory, Piper TTS, and Playwright browser.
+- **1-Click Web Command**:
   ```powershell
   irm https://raw.githubusercontent.com/Gaurav01001/Thanatos/main/install.ps1 | iex
   ```
-  Sets up portable virtualenv, pulls models, and binds global `thanatos` command to PATH.
+
+---
+
+### Stage 10: Clipboard Intelligence & "Smart Fix" (Status: ✅ COMPLETED)
+- **Goal**: User-friendly, zero-latency clipboard diagnosis and instant code/prose fix with 0 extra storage dependencies.
+- **Implemented & Verified**:
+  - `src/engine/clipboard/smart_fix.py`:
+    - Native Windows clipboard read/write via `win32clipboard` with safe `ctypes` user32 fallback.
+    - Heuristic classification into 4 content types: `traceback`, `json`, `code`, and `prose`.
+    - Strict, specialized LLM prompt generation for `qwen2.5-coder:7b`.
+    - `parse_smart_fix_response`: Extracts diagnosis, clean replacement text, and 1-sentence vocal summary.
+  - `src/engine/brain/brain.py`:
+    - Added `Brain.fix_clipboard_content()` method returning structured `SmartFixResult`.
+    - 0ms fast-path intent matching for `"smart fix"`, `"fix clipboard"`, `"polish clipboard"`.
+  - `src/engine/security/validator.py`: Registered `"smart_fix_clipboard"` as target-less `SAFE_ACTIONS`.
+  - `src/engine/core/hotkey.py`: Integrated `<ctrl>+<shift>+v` global hotkey (configurable via `config.json`) with per-key debouncing.
+  - `src/engine/__main__.py`: Connected end-to-end event dispatch loop. Places fixed text directly back on user's clipboard ready for `Ctrl+V`, presents formatted diff card to HUD Mini-Deck, and speaks diagnosis via Piper TTS.
+  - `tests/test_stage10_clipboard.py`: 11 automated unit tests verifying content classification, prompt building, response parsing, security validation, and hotkey registration passing 100% green.
+
+---
+
+### Stage 11: Elastic Resizable HUD & Minimum Dimension Lock (Status: ✅ COMPLETED)
+- **Goal**: Allow dragging the corner or bottom edge to resize the Tokyo Night Mini-Deck (`FloatingHUD`) with strict minimum dimension locks, dynamic responsive header layout, and persistent geometry.
+- **Implemented & Verified**:
+  - `src/engine/ui/hud.py`:
+    - Added configurable `min_width` (default 340px, hard floor 280px) and `min_height` (default 240px, hard floor 180px).
+    - `_load_hud_config()`: Automatically loads initial geometry and minimum limits from `config.json` with safe fallbacks.
+    - `_save_geometry_to_config()`: Automatically persists user-adjusted width and height back to `config.json` on resize release (`<ButtonRelease-1>`).
+    - `set_min_dimensions(w, h)` & `set_dimensions(w, h)`: Strict clamping mathematical guarantees ensuring window never collapses or truncates buttons/logs.
+    - Dynamic responsive header (`_draw_pill`): Window controls (expand/collapse, clear, mute, close) adapt dynamically relative to current width (`cur_w - 110`, `- 80`, `- 50`, `- 20`), ensuring buttons stay anchored to top-right at any width.
+    - Drag Grips:
+      - Interactive visual bottom-right corner grip (`◢`, cursor `size_nw_se`) for simultaneous width and height expansion.
+      - Interactive bottom edge resize strip (cursor `size_ns`) for vertical expansion.
+      - Uses absolute screen coordinates (`event.x_root`, `event.y_root`) preventing erratic mouse jumping over Tkinter widgets.
+  - `config.json`: Added `"hud"` block configuring `"width": 340`, `"height": 240`, `"min_width": 340`, and `"min_height": 240`.
+  - `tests/test_stage11_hud_resize.py`: 7 automated unit tests covering config loading, dimension clamping, safety floors, persistence to `config.json`, and simulated drag clamping passing 100% green.
+
+---
+
+### Stage 12: Grounded Live Web Synthesis ("ChatGPT-Style Search & Answer") (Status: ✅ COMPLETED)
+- **Goal**: Direct, conversational answers and recommendations for product, price, shopping, and real-time queries with background web grounding (zero browser popups or raw link dumps).
+- **Implemented & Verified**:
+  - `src/engine/brain/brain.py`:
+    - **Intent Classification Disambiguation**: Restricts `browse_web` strictly to explicit browser commands (`"open browser and search"`, `"search in browser"`). All informational questions, product recommendations, advice, reviews, and price lookups route to cognitive `chat`.
+    - **Perceptive Web Advisory Synthesis**: In `Brain.respond()`, when routed to `WEB_SEARCH`, harvests background DuckDuckGo snippets and prompts the LLM to deliver 2-3 specific recommendations with realistic prices, pros/cons, and a clear top pick without telling the user to search themselves.
+    - **Clean Spoken Output**: Strips markdown formatting symbols (`*`, `#`, bullet dashes) in `_create_spoken_summary()` so Piper TTS reads natural conversational speech without vocalizing asterisks.
+  - `src/engine/brain/knowledge_router.py`:
+    - Added fast-path keyword recognition for recommendations, products, reviews, and budgets (`"suggest"`, `"recommend"`, `"best"`, `"under rs"`, `"under ₹"`, `"price"`, `"perfume"`, `"specs"`).
+    - Regex pattern matching for budget queries (`r"\bunder\s+(?:rs\.?|inr|₹|\$)?\s*\d+"`) routing straight to `WEB_SEARCH`.
+  - `src/engine/__main__.py`:
+    - **Defensive Guard**: Any ambiguous query that slips through to `browse_web` without explicit browser keywords (`"browser"`, `"chrome"`, `"firefox"`, `"edge"`) is automatically redirected to cognitive web grounding instead of launching Chromium.
+  - `tests/test_stage12_web_grounding.py`: 5 automated unit tests verifying shopping/budget routing, browser vs. chat disambiguation, clean speech summary extraction, ChatGPT-style dual-track synthesis, and the defensive browser guard passing 100% green.

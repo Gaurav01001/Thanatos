@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import ClassVar
 
 import ollama
@@ -28,8 +29,12 @@ class KnowledgeRouter:
 
     WEB_KEYWORDS: ClassVar[set[str]] = {
         "near me", "nearby", "latest", "recent news", "today", "tomorrow",
-        "weather", "score", "price of", "release date", "current version",
-        "best restaurants", "search the web", "search for", "look up on web"
+        "weather", "score", "price of", "price", "prices", "release date",
+        "current version", "best restaurants", "search the web", "search for",
+        "look up on web", "suggest", "recommend", "recommendation", "recommendations",
+        "best", "top rated", "under rs", "under ₹", "cheap", "affordable",
+        "buying guide", "which should i buy", "perfume", "fragrance", "cologne",
+        "review", "reviews", "deal", "discount", "specs"
     }
 
     def __init__(self, model: str = "qwen2.5-coder:7b"):
@@ -49,7 +54,7 @@ class KnowledgeRouter:
 
         # Fast-Path 1: If no documents are indexed, default to CONVERSATIONAL (unless web search keyword)
         if indexed_documents is not None and len(indexed_documents) == 0:
-            if any(kw in clean_query for kw in self.WEB_KEYWORDS):
+            if any(kw in clean_query for kw in self.WEB_KEYWORDS) or re.search(r"\bunder\s+(?:rs\.?|inr|₹|\$)?\s*\d+", clean_query):
                 return "WEB_SEARCH"
             return "CONVERSATIONAL"
 
@@ -74,8 +79,16 @@ class KnowledgeRouter:
         if clean_query in {"hi", "hello", "hey", "status", "who are you", "what can you do"}:
             return "CONVERSATIONAL"
 
-        # Fast-Path 4: Real-time, local places, and web search keywords
+        # Fast-Path 4: Real-time, shopping, recommendations, budget & web search keywords
         if any(kw in clean_query for kw in self.WEB_KEYWORDS):
+            return "WEB_SEARCH"
+
+        # Fast-Path 5: Budget / price patterns like "under 3000 rupees", "under ₹2000", "under $50"
+        if re.search(r"\bunder\s+(?:rs\.?|inr|₹|\$)?\s*\d+", clean_query):
+            return "WEB_SEARCH"
+
+        # Fast-Path 6: Recommendation intent openers
+        if any(clean_query.startswith(p) for p in ("suggest ", "recommend ", "what is the best ", "which is the best ", "top 3 ", "top 5 ")):
             return "WEB_SEARCH"
 
         # LLM Classification for ambiguous queries
@@ -103,7 +116,7 @@ Categories:
 1. "CONVERSATIONAL": General chit-chat, programming help, evergreen general knowledge.
 2. "DOCUMENT_RETRIEVAL": Asking for facts from user's indexed documents or notes.
 3. "HYBRID": Needs both general reasoning AND specific document facts or comparison.
-4. "WEB_SEARCH": Real-time information, latest versions, current news/events, weather, local places near me.
+4. "WEB_SEARCH": Real-time information, product recommendations, shopping suggestions, prices, reviews, latest versions, current news/events, weather, local places near me.
 
 Return ONLY a JSON object: {{"route": "CONVERSATIONAL" | "DOCUMENT_RETRIEVAL" | "HYBRID" | "WEB_SEARCH"}}"""
 

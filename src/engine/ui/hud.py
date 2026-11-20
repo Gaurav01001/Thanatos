@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 from tkinter import filedialog
 from typing import TYPE_CHECKING, ClassVar
 
@@ -40,13 +42,31 @@ class FloatingHUD:
         on_submit_query: Callable[[str], None] | None = None,
         collapsed_width: int = 340,
         collapsed_height: int = 42,
-        expanded_width: int = 380,
-        expanded_height: int = 340,
+        expanded_width: int | None = None,
+        expanded_height: int | None = None,
+        min_width: int | None = None,
+        min_height: int | None = None,
+        config_path: Path | None = None,
     ) -> None:
+        self.config_path = config_path or (Path(__file__).resolve().parents[3] / "config.json")
+        hud_cfg = self._load_hud_config()
+
+        # Enforce configurable minimum dimension lock
+        cfg_min_w = hud_cfg.get("min_width", 340)
+        cfg_min_h = hud_cfg.get("min_height", 240)
+        self.min_width: int = max(280, int(min_width if min_width is not None else cfg_min_w))
+        self.min_height: int = max(180, int(min_height if min_height is not None else cfg_min_h))
+
         self.collapsed_width = collapsed_width
         self.collapsed_height = collapsed_height
-        self.expanded_width = expanded_width
-        self.expanded_height = expanded_height
+
+        # Resizable expanded dimensions (persisted from config or initialized)
+        cfg_exp_w = hud_cfg.get("expanded_width", 380)
+        cfg_exp_h = hud_cfg.get("expanded_height", 340)
+        target_exp_w = int(expanded_width if expanded_width is not None else cfg_exp_w)
+        target_exp_h = int(expanded_height if expanded_height is not None else cfg_exp_h)
+        self.expanded_width: int = max(self.min_width, target_exp_w)
+        self.expanded_height: int = max(self.min_height, target_exp_h)
 
         self.on_click = on_click
         self.on_mute_toggle = on_mute_toggle
@@ -64,12 +84,82 @@ class FloatingHUD:
         self.chat_display: tk.Text | None = None
         self.entry_box: tk.Entry | None = None
         self.status_label: tk.Label | None = None
+        self.resize_grip: tk.Label | None = None
+        self.bottom_resize_bar: tk.Frame | None = None
 
         self._thread: threading.Thread | None = None
         self._drag_data: dict[str, int | bool] = {"x": 0, "y": 0, "moved": False}
+        self._resize_data: dict[str, int | bool] = {
+            "start_x": 0,
+            "start_y": 0,
+            "start_w": 0,
+            "start_h": 0,
+            "resizing": False,
+        }
         self._is_running: bool = False
         self._pulse_active: bool = False
         self._pulse_state: bool = False
+
+    def _load_hud_config(self) -> dict:
+        """Reads HUD dimension parameters from config.json safely."""
+        if self.config_path and self.config_path.exists():
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data.get("hud"), dict):
+                        return data["hud"]
+            except Exception as e:
+                logger.warning("Could not read HUD config: %s", e)
+        return {}
+
+    def _save_geometry_to_config(self) -> None:
+        """Persists custom HUD dimensions to config.json."""
+        if not self.config_path:
+            return
+        try:
+            cfg = {}
+            if self.config_path.exists():
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            if "hud" not in cfg or not isinstance(cfg["hud"], dict):
+                cfg["hud"] = {}
+
+            cfg["hud"]["expanded_width"] = self.expanded_width
+            cfg["hud"]["expanded_height"] = self.expanded_height
+            cfg["hud"]["min_width"] = self.min_width
+            cfg["hud"]["min_height"] = self.min_height
+
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+            logger.info(
+                "Saved custom HUD layout: %dx%d (min: %dx%d)",
+                self.expanded_width, self.expanded_height, self.min_width, self.min_height
+            )
+        except Exception as e:
+            logger.warning("Could not save HUD layout to config: %s", e)
+
+    def set_min_dimensions(self, min_width: int, min_height: int) -> tuple[int, int]:
+        """Sets fixed minimum dimension constraints with mathematical safety floor."""
+        self.min_width = max(280, int(min_width))
+        self.min_height = max(180, int(min_height))
+        if self.expanded_width < self.min_width or self.expanded_height < self.min_height:
+            self.set_dimensions(self.expanded_width, self.expanded_height)
+        return self.min_width, self.min_height
+
+    def set_dimensions(self, width: int, height: int) -> tuple[int, int]:
+        """Applies dimensions clamped strictly against min_width and min_height."""
+        clamped_w = max(self.min_width, int(width))
+        clamped_h = max(self.min_height, int(height))
+        self.expanded_width = clamped_w
+        self.expanded_height = clamped_h
+        if self.root and self.is_expanded:
+            cur_x = self.root.winfo_x()
+            cur_y = self.root.winfo_y()
+            self.root.geometry(f"{clamped_w}x{clamped_h}+{cur_x}+{cur_y}")
+            if self.top_canvas:
+                self.top_canvas.configure(width=clamped_w)
+            self._draw_pill()
+        return clamped_w, clamped_h
 
     def _setup_window(self) -> None:
         """Initializes the borderless, topmost, translucent Tkinter window."""
@@ -136,7 +226,7 @@ class FloatingHUD:
 
         # Bottom Entry & Send Row
         input_row = tk.Frame(self.deck_frame, bg="#1a1b26")
-        input_row.pack(fill="x")
+        input_row.pack(fill="x", side="top")
 
         self.entry_box = tk.Entry(
             input_row,
@@ -159,7 +249,28 @@ class FloatingHUD:
             command=self._handle_submit,
             cursor="hand2",
         )
-        send_btn.pack(side="right")
+        send_btn.pack(side="left")
+
+        # Tokyo Night diagonal corner resize grip (◢)
+        self.resize_grip = tk.Label(
+            input_row,
+            text="◢",
+            bg="#1a1b26",
+            fg="#7aa2f7",
+            font=("Segoe UI", 8, "bold"),
+            cursor="size_nw_se",
+        )
+        self.resize_grip.pack(side="right", padx=(4, 0))
+        self.resize_grip.bind("<Button-1>", self._on_resize_start)
+        self.resize_grip.bind("<B1-Motion>", self._on_resize_drag)
+        self.resize_grip.bind("<ButtonRelease-1>", self._on_resize_end)
+
+        # Bottom subtle drag strip for vertical resizing
+        self.bottom_resize_bar = tk.Frame(self.deck_frame, bg="#1a1b26", height=4, cursor="size_ns")
+        self.bottom_resize_bar.pack(fill="x", side="bottom", pady=(2, 0))
+        self.bottom_resize_bar.bind("<Button-1>", self._on_resize_start)
+        self.bottom_resize_bar.bind("<B1-Motion>", self._on_resize_drag_vertical)
+        self.bottom_resize_bar.bind("<ButtonRelease-1>", self._on_resize_end)
 
         # Map and stay on top
         self.root.deiconify()
@@ -193,20 +304,87 @@ class FloatingHUD:
             font=("Segoe UI Semibold", 9), tags="title",
         )
 
-        # Right-aligned symbol buttons
+        cur_w = self.root.winfo_width() if self.root else self.collapsed_width
+        if cur_w <= 1:
+            cur_w = self.expanded_width if self.is_expanded else self.collapsed_width
+
+        # Right-aligned symbol buttons (responsive to window width)
         # 1. Mute Button [ 🔊 / 🔇 ]
         mute_icon = "🔇" if self.is_muted else "🔊"
-        self._create_canvas_button(205, 20, mute_icon, self._on_btn_mute, tags="btn_mute")
+        self._create_canvas_button(cur_w - 110, 20, mute_icon, self._on_btn_mute, tags="btn_mute")
 
         # 2. Voice Button [ 🎙️ ]
-        self._create_canvas_button(235, 20, "🎙️", self._on_btn_voice, tags="btn_voice")
+        self._create_canvas_button(cur_w - 80, 20, "🎙️", self._on_btn_voice, tags="btn_voice")
 
         # 3. File Index Button [ 📁 ]
-        self._create_canvas_button(265, 20, "📁", self._on_btn_file, tags="btn_file")
+        self._create_canvas_button(cur_w - 50, 20, "📁", self._on_btn_file, tags="btn_file")
 
         # 4. Expand / Collapse Button [ ⤢ / ⤡ ]
         expand_icon = "⤡" if self.is_expanded else "⤢"
-        self._create_canvas_button(295, 20, expand_icon, self.toggle_expand, tags="btn_expand")
+        self._create_canvas_button(cur_w - 20, 20, expand_icon, self.toggle_expand, tags="btn_expand")
+
+    def _on_resize_start(self, event: tk.Event) -> None:
+        """Captures initial screen position and dimensions at drag-resize start."""
+        if not self.root:
+            return
+        self._resize_data["start_x"] = event.x_root
+        self._resize_data["start_y"] = event.y_root
+        self._resize_data["start_w"] = self.root.winfo_width()
+        self._resize_data["start_h"] = self.root.winfo_height()
+        self._resize_data["resizing"] = True
+
+    def _on_resize_drag(self, event: tk.Event) -> None:
+        """Dynamically resizes window diagonally with strict minimum dimension locks."""
+        if not self.root or not self._resize_data.get("resizing", False):
+            return
+
+        dx = event.x_root - int(self._resize_data["start_x"])
+        dy = event.y_root - int(self._resize_data["start_y"])
+
+        new_w = int(self._resize_data["start_w"]) + dx
+        new_h = int(self._resize_data["start_h"]) + dy
+
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        max_w = int(screen_w * 0.95)
+        max_h = int(screen_h * 0.95)
+
+        clamped_w = max(self.min_width, min(max_w, new_w))
+        clamped_h = max(self.min_height, min(max_h, new_h))
+
+        self.expanded_width = clamped_w
+        self.expanded_height = clamped_h
+
+        cur_x = self.root.winfo_x()
+        cur_y = self.root.winfo_y()
+        self.root.geometry(f"{clamped_w}x{clamped_h}+{cur_x}+{cur_y}")
+
+        if self.top_canvas:
+            self.top_canvas.configure(width=clamped_w)
+            self._draw_pill()
+
+    def _on_resize_drag_vertical(self, event: tk.Event) -> None:
+        """Dynamically resizes window height from bottom edge with minimum dimension lock."""
+        if not self.root or not self._resize_data.get("resizing", False):
+            return
+
+        dy = event.y_root - int(self._resize_data["start_y"])
+        new_h = int(self._resize_data["start_h"]) + dy
+
+        screen_h = self.root.winfo_screenheight()
+        max_h = int(screen_h * 0.95)
+        clamped_h = max(self.min_height, min(max_h, new_h))
+
+        self.expanded_height = clamped_h
+        cur_w = self.root.winfo_width()
+        cur_x = self.root.winfo_x()
+        cur_y = self.root.winfo_y()
+        self.root.geometry(f"{cur_w}x{clamped_h}+{cur_x}+{cur_y}")
+
+    def _on_resize_end(self, event: tk.Event) -> None:
+        """Finalizes resizing and persists new geometry to config."""
+        self._resize_data["resizing"] = False
+        self._save_geometry_to_config()
 
     def _create_canvas_button(self, x: int, y: int, text: str, callback: Callable[[], None], tags: str) -> None:
         """Creates a clickable text button on the top canvas."""
@@ -252,6 +430,18 @@ class FloatingHUD:
 
             threading.Thread(target=_async_index, daemon=True).start()
 
+    def _safe_after(self, delay_ms: int, func: Callable, *args: Any) -> None:
+        """Safely dispatches callback to Tk mainloop or executes directly if outside mainloop."""
+        if not self.root:
+            return
+        try:
+            self.root.after(delay_ms, func, *args)
+        except (RuntimeError, tk.TclError):
+            try:
+                func(*args)
+            except Exception:
+                pass
+
     def toggle_expand(self) -> None:
         """Toggles between collapsed 42px pill and expanded 340px card."""
         if self.is_expanded:
@@ -262,8 +452,7 @@ class FloatingHUD:
     def expand(self) -> None:
         """Smoothly expands window downward to reveal chat and input."""
         self.is_expanded = True
-        if self.root:
-            self.root.after(0, self._do_expand)
+        self._safe_after(0, self._do_expand)
 
     def _do_expand(self) -> None:
         if not self.root or not self.deck_frame:
@@ -279,8 +468,7 @@ class FloatingHUD:
     def collapse(self) -> None:
         """Shrinks back into the discreet 42px top pill."""
         self.is_expanded = False
-        if self.root:
-            self.root.after(0, self._do_collapse)
+        self._safe_after(0, self._do_collapse)
 
     def _do_collapse(self) -> None:
         if not self.root or not self.deck_frame:
@@ -297,12 +485,14 @@ class FloatingHUD:
             return
 
         def _do_append():
+            if not self.chat_display:
+                return
             self.chat_display.configure(state="normal")
             self.chat_display.insert("end", f"{sender}: {text}\n\n")
             self.chat_display.see("end")
             self.chat_display.configure(state="disabled")
 
-        self.root.after(0, _do_append)
+        self._safe_after(0, _do_append)
 
     def _handle_submit(self) -> None:
         """Submits user text query from the expanded entry box."""
@@ -352,23 +542,23 @@ class FloatingHUD:
             self._pulse_state = False
             self._draw_pill()
 
-        self.root.after(450, self._schedule_pulse)
+        self._safe_after(450, self._schedule_pulse)
 
     def on_state_change(self, old_state: State, new_state: State) -> None:
         """Thread-safe callback invoked by StateManager."""
         self.current_state_name = new_state.value
+        self._safe_after(0, self._draw_pill)
         if self.root:
-            self.root.after(0, self._draw_pill)
-            self.root.after(0, self.root.lift)
-            self.root.after(0, lambda: self.root.attributes("-topmost", True))
+            self._safe_after(0, self.root.lift)
+            self._safe_after(0, lambda: self.root.attributes("-topmost", True) if self.root else None)
 
     def show(self) -> None:
         if self.root:
-            self.root.after(0, self.root.deiconify)
+            self._safe_after(0, self.root.deiconify)
 
     def hide(self) -> None:
         if self.root:
-            self.root.after(0, self.root.withdraw)
+            self._safe_after(0, self.root.withdraw)
 
     def start(self) -> None:
         """Starts the HUD in a dedicated daemon thread."""
@@ -390,8 +580,5 @@ class FloatingHUD:
         """Closes and destroys the HUD window cleanly."""
         self._is_running = False
         if self.root:
-            try:
-                self.root.after(0, self.root.destroy)
-            except Exception:  # noqa: BLE001, S110
-                pass
+            self._safe_after(0, self.root.destroy)
             self.root = None
